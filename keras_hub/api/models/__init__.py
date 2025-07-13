@@ -596,6 +596,7 @@ from keras_hub.src.models.t5.t5_preprocessor import (
     T5Preprocessor as T5Preprocessor,
 )
 from keras_hub.src.models.t5.t5_tokenizer import T5Tokenizer as T5Tokenizer
+from keras_hub.src.models.t5gemma.t5gemma_backbone import T5GemmaBackbone as T5GemmaBackbone
 from keras_hub.src.models.task import Task as Task
 from keras_hub.src.models.text_classifier import TextClassifier as Classifier
 from keras_hub.src.models.text_classifier import (
