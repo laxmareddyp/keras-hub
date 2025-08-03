@@ -1,14 +1,11 @@
-# Tensorflow.
-tensorflow-cpu~=2.19.0;sys_platform != 'darwin'
-tensorflow~=2.19.0;sys_platform == 'darwin'
-tensorflow-text~=2.19;platform_system != 'Windows'
-
-# Torch.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch>=2.6.0
-torchvision>=0.16.0
-
-# Jax.
-jax[cpu]
-
--r requirements-common.txt
+requests>=2.25.0
+pathlib>=1.0.1
+dataclasses>=0.6; python_version<"3.7"
+argparse>=1.4.0
+ast
+absl-py>=0.10.0
+numpy>=1.19.0
+torch>=1.9.0
+transformers>=4.20.0
+keras>=3.0.0
+keras-hub>=0.8.0

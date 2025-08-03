@@ -1,189 +1,212 @@
-# KerasHub: Multi-framework Pretrained Models
-[![](https://github.com/keras-team/keras-hub/workflows/Tests/badge.svg?branch=master)](https://github.com/keras-team/keras-hub/actions?query=workflow%3ATests+branch%3Amaster)
-![Python](https://img.shields.io/badge/python-v3.9.0+-success.svg)
-[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/keras-team/keras-hub/issues)
+# HuggingFace to KerasHub Model Converter
 
-> [!IMPORTANT]
-> 📢 KerasNLP is now KerasHub! 📢 Read
-> [the announcement](https://github.com/keras-team/keras-hub/issues/1831).
+A comprehensive tool that analyzes HuggingFace model repositories via API calls and generates complete KerasHub-compatible implementation files including backbone, tokenizer, preprocessor, and conversion utilities.
 
-**KerasHub** is a pretrained modeling library that aims to be simple, flexible,
-and fast. The library provides [Keras 3](https://keras.io/keras_3/)
-implementations of popular model architectures, paired with a collection of
-pretrained checkpoints available on [Kaggle Models](https://kaggle.com/models/).
-Models can be used with text, image, and audio data for generation, classification,
-and many other built in tasks.
+## 🚀 Features
 
-KerasHub is an extension of the core Keras API; KerasHub components are provided
-as `Layer` and `Model` implementations. If you are  familiar with Keras,
-congratulations! You already understand most of KerasHub.
+- **Automated Architecture Analysis**: Analyzes HF models via API to detect attention mechanisms, layer structures, activations, and more
+- **Complete File Generation**: Generates all necessary KerasHub files including:
+  - `{model}_backbone.py` - Core model architecture
+  - `{model}_attention.py` - Attention mechanism implementation  
+  - `{model}_decoder.py` - Transformer decoder layers
+  - `{model}_tokenizer.py` - Tokenizer wrapper
+  - `{model}_causal_lm.py` - Causal language model implementation
+  - `{model}_preprocessor.py` - Input preprocessing
+  - `{model}_config.py` - Model configuration
+  - `{model}_presets.py` - Model variant definitions
+  - `convert_{model}_checkpoints.py` - Weight conversion script
+  - Comprehensive test files
+- **Framework Translation**: Converts PyTorch/HF patterns to Keras/KerasHub patterns
+- **Weight Conversion**: Generates scripts to convert HF weights to KerasHub format
+- **Architecture Detection**: Automatically detects and handles different model architectures
 
-All models support JAX, TensorFlow, and PyTorch from a single model
-definition and can be fine-tuned on GPUs and TPUs out of the box. Models can
-be trained on individual accelerators with built-in PEFT techniques, or
-fine-tuned at scale with model and data parallel training. See our
-[Getting Started guide](https://keras.io/guides/keras_hub/getting_started)
-to start learning our API.
+## 📋 Requirements
 
-## Quick Links
-
-### For everyone
-
-- [Home page](https://keras.io/keras_hub)
-- [Getting started](https://keras.io/keras_hub/getting_started)
-- [Guides](https://keras.io/keras_hub/guides)
-- [API documentation](https://keras.io/keras_hub/api)
-- [Pre-trained models](https://keras.io/keras_hub/presets/)
-
-### For contributors
-
-- [Call for Contributions](https://github.com/keras-team/keras-hub/issues/1835)
-- [Roadmap](https://github.com/keras-team/keras-hub/issues/1836)
-- [Contributing Guide](CONTRIBUTING.md)
-- [Style Guide](STYLE_GUIDE.md)
-- [API Design Guide](API_DESIGN_GUIDE.md)
-
-## Quickstart
-
-Choose a backend:
-
-```python
-import os
-os.environ["KERAS_BACKEND"] = "jax"  # Or "tensorflow" or "torch"!
+```bash
+pip install requests pathlib dataclasses argparse
 ```
 
-Import KerasHub and other libraries:
+## 🔧 Usage
 
-```python
-import keras
-import keras_hub
-import numpy as np
-import tensorflow_datasets as tfds
+### Basic Usage
+
+```bash
+python hf_to_kerashub_converter.py --model_name microsoft/DialoGPT-medium
 ```
 
-Load a resnet model and use it to predict a label for an image:
+### Advanced Usage
 
-```python
-classifier = keras_hub.models.ImageClassifier.from_preset(
-    "resnet_50_imagenet",
-    activation="softmax",
-)
-url = "https://upload.wikimedia.org/wikipedia/commons/a/aa/California_quail.jpg"
-path = keras.utils.get_file(origin=url)
-image = keras.utils.load_img(path)
-preds = classifier.predict(np.array([image]))
-print(keras_hub.utils.decode_imagenet_predictions(preds))
+```bash
+python hf_to_kerashub_converter.py \
+    --model_name facebook/opt-1.3b \
+    --output_dir ./my_generated_models \
+    --hf_token your_hf_token_here
 ```
 
-Load a Bert model and fine-tune it on IMDb movie reviews:
+### Batch Conversion Example
 
-```python
-classifier = keras_hub.models.TextClassifier.from_preset(
-    "bert_base_en_uncased",
-    activation="softmax",
-    num_classes=2,
-)
-imdb_train, imdb_test = tfds.load(
-    "imdb_reviews",
-    split=["train", "test"],
-    as_supervised=True,
-    batch_size=16,
-)
-classifier.fit(imdb_train, validation_data=imdb_test)
-preds = classifier.predict(["What an amazing movie!", "A total waste of time."])
-print(preds)
+```bash
+python example_usage.py
 ```
 
-## Installation
+## 📊 Supported Model Types
 
-To install the latest KerasHub release with Keras 3, simply run:
+The converter currently supports analysis and generation for:
 
-```
-pip install --upgrade keras-hub
-```
+- **GPT-style models**: GPT-2, DialoGPT, CodeGPT, etc.
+- **BERT-style models**: BERT, DistilBERT, RoBERTa, etc.
+- **Modern LLMs**: OPT, GPT-Neo, Llama, Mistral, etc.
+- **Specialized models**: CodeBERT, BioBERT, etc.
 
-Our text tokenizers are based on TensorFlow Text. Hence, if you are using any
-model which has language as a modality, you will have to run:
+## 🎯 Generated File Structure
 
-```
-pip install --upgrade keras-hub[nlp]
-```
-
-To install the latest nightly changes for both KerasHub and Keras, you can use
-our nightly package.
+For a model named `my_model`, the converter generates:
 
 ```
-pip install --upgrade keras-hub-nightly
+generated_models/my_model/
+├── __init__.py                           # Package initialization
+├── my_model_config.py                    # Model configuration class
+├── my_model_backbone.py                  # Core backbone implementation
+├── my_model_attention.py                 # Attention mechanism
+├── my_model_decoder.py                   # Transformer decoder layer
+├── my_model_layernorm.py                 # Layer normalization
+├── my_model_tokenizer.py                 # Tokenizer wrapper
+├── my_model_causal_lm.py                 # Causal language model
+├── my_model_causal_lm_preprocessor.py    # Input preprocessor
+├── my_model_presets.py                   # Model presets/variants
+├── convert_my_model_checkpoints.py       # Weight conversion script
+├── my_model_backbone_test.py             # Backbone tests
+└── my_model_tokenizer_test.py            # Tokenizer tests
 ```
 
-Currently, installing KerasHub will always pull in TensorFlow for use of the
-`tf.data` API for preprocessing. When pre-processing with `tf.data`, training
-can still happen on any backend.
+## 🔍 Architecture Analysis
 
-Visit the [core Keras getting started page](https://keras.io/getting_started/)
-for more information on installing Keras 3, accelerator support, and
-compatibility with different frameworks.
+The tool automatically detects:
 
-## Configuring your backend
+- **Attention Type**: Multi-head, grouped-query, flash attention, etc.
+- **Activation Functions**: GELU, ReLU, SiLU, etc.
+- **Normalization**: LayerNorm, RMSNorm
+- **Position Encoding**: Absolute, RoPE, ALiBi, relative
+- **Layer Structure**: Self-attention, feed-forward, cross-attention
+- **Model Capabilities**: Causal LM, sequence classification, etc.
 
-If you have Keras 3 installed in your environment (see installation above),
-you can use KerasHub with any of JAX, TensorFlow and PyTorch. To do so, set the
-`KERAS_BACKEND` environment variable. For example:
+## 📝 Example Output
 
-```shell
-export KERAS_BACKEND=jax
+```bash
+🚀 Starting HuggingFace to KerasHub conversion for: microsoft/DialoGPT-medium
+
+🔍 Analyzing model: microsoft/DialoGPT-medium
+
+📋 Model Analysis Summary:
+   - Model Type: gpt2
+   - Attention: multi_head_attention
+   - Activation: gelu
+   - Normalization: layer_norm
+   - Position Encoding: absolute
+   - Supports Causal LM: True
+
+📁 Generating files in: ./generated_models/dialogpt_medium
+
+✅ Generated complete KerasHub implementation for dialogpt_medium
+
+🎉 Conversion completed successfully!
+📁 Generated files are in: ./generated_models
+
+📝 Next steps:
+   1. Review generated files and customize as needed
+   2. Implement tokenizer vocabulary extraction
+   3. Fine-tune weight conversion mapping
+   4. Test with actual model weights
+   5. Add to KerasHub model registry
 ```
 
-Or in Colab, with:
+## 🛠️ Manual Customization Required
 
-```python
-import os
-os.environ["KERAS_BACKEND"] = "jax"
+While the converter generates 70-90% of the implementation automatically, some manual work is typically needed:
 
-import keras_hub
+### 1. Tokenizer Implementation
+- Extract vocabulary from HuggingFace tokenizer
+- Handle BPE merge rules properly  
+- Implement special token handling
+
+### 2. Weight Conversion Fine-tuning
+- Adjust layer name mappings between HF and KerasHub
+- Handle architecture-specific weight reshaping
+- Test weight conversion accuracy
+
+### 3. Architecture-specific Logic
+- Custom attention mechanisms
+- Unique activation functions
+- Special preprocessing requirements
+
+## 🧪 Testing Generated Models
+
+Each generated model includes test files. To run tests:
+
+```bash
+cd generated_models/my_model
+python -m pytest my_model_backbone_test.py -v
+python -m pytest my_model_tokenizer_test.py -v
 ```
 
-> [!IMPORTANT]
-> Make sure to set the `KERAS_BACKEND` **before** importing any Keras libraries;
-> it will be used to set up Keras when it is first imported.
+## 🔄 Weight Conversion Process
 
-## Compatibility
+1. **Use the generated conversion script**:
+   ```bash
+   cd generated_models/my_model
+   python convert_my_model_checkpoints.py --preset my_model_base_en
+   ```
 
-We follow [Semantic Versioning](https://semver.org/), and plan to
-provide backwards compatibility guarantees both for code and saved models built
-with our components. While we continue with pre-release `0.y.z` development, we
-may break compatibility at any time and APIs should not be considered stable.
+2. **Manual steps required**:
+   - Implement tokenizer vocabulary extraction
+   - Fine-tune weight layer mappings
+   - Test output equivalence with HF model
 
-## Disclaimer
+## 📚 Integration with KerasHub
 
-KerasHub provides access to pre-trained models via the `keras_hub.models` API.
-These pre-trained models are provided on an "as is" basis, without warranties
-or conditions of any kind. The following underlying models are provided by third
-parties, and subject to separate licenses:
-BART, BLOOM, DeBERTa, DistilBERT, GPT-2, Llama, Mistral, OPT, RoBERTa, Whisper,
-and XLM-RoBERTa.
+To integrate the generated model with KerasHub:
 
-## Citing KerasHub
+1. **Copy files to KerasHub source**:
+   ```bash
+   cp -r generated_models/my_model keras_hub/src/models/
+   ```
 
-If KerasHub helps your research, we appreciate your citations.
-Here is the BibTeX entry:
+2. **Update KerasHub registry**:
+   - Add imports to `keras_hub/src/models/__init__.py`
+   - Register model classes in appropriate modules
 
-```bibtex
-@misc{kerashub2024,
-  title={KerasHub},
-  author={Watson, Matthew, and  Chollet, Fran\c{c}ois and Sreepathihalli,
-  Divyashree, and Saadat, Samaneh and Sampath, Ramesh, and Rasskin, Gabriel and
-  and Zhu, Scott and Singh, Varun and Wood, Luke and Tan, Zhenyu and Stenbit,
-  Ian and Qian, Chen, and Bischof, Jonathan and others},
-  year={2024},
-  howpublished={\url{https://github.com/keras-team/keras-hub}},
-}
-```
+3. **Add to preset system**:
+   - Upload weights to Kaggle/HF Hub
+   - Update preset configurations
 
-## Acknowledgements
+## 🤝 Contributing
 
-Thank you to all of our wonderful contributors!
+Contributions are welcome! Areas for improvement:
 
-<a href="https://github.com/keras-team/keras-hub/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=keras-team/keras-hub" />
-</a>
+- **Enhanced Architecture Detection**: Support for more model types
+- **Better Weight Mapping**: More sophisticated conversion logic
+- **Tokenizer Automation**: Automatic vocabulary extraction
+- **Testing Framework**: More comprehensive test generation
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- HuggingFace team for the Transformers library
+- Google KerasHub team for the KerasHub framework
+- Open source community for model implementations
+
+## 🐛 Issues and Support
+
+If you encounter issues:
+
+1. Check that the HuggingFace model is publicly accessible
+2. Verify the model has a standard configuration format
+3. Review generated files for any obvious errors
+4. Open an issue with the model name and error details
+
+---
+
+**Note**: This tool generates starting implementations that require manual refinement. The generated code should be reviewed and tested before production use.
