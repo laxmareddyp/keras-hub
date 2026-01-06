@@ -1,7 +1,6 @@
 import gc
 import os
 import types
-
 import keras
 import numpy as np
 import torch
