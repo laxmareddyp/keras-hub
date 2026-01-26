@@ -38,7 +38,7 @@ PRESET_MAP = {
     "medgemma_4b": "google/medgemma-4b-pt",
     "medgemma_instruct_4b": "google/medgemma-4b-it",
     "medgemma_instruct_27b": "google/medgemma-27b-it",
-    "medgemma_instruct_27b_text" : "google/medgemma-27b-text-it",
+    "medgemma_instruct_27b_text": "google/medgemma-27b-text-it",
 }
 
 FLAGS = flags.FLAGS
