@@ -155,7 +155,7 @@ def main(_):
         )
     )
 
-    print("\n-> Huggingface model and tokenizer loaded")
+    print("\n-> Huggingface model and tokenizer loaded successfully!")
 
     # === Check that the models and tokenizers outputs match ===
     test_tokenizer(keras_hub_tokenizer, hf_tokenizer)
