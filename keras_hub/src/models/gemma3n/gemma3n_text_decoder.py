@@ -2,6 +2,12 @@ import math
 
 import keras
 
+from keras_hub.src.layers.modeling.transformer_layer_utils import (
+    compute_causal_mask,
+)
+from keras_hub.src.layers.modeling.transformer_layer_utils import (
+    merge_padding_and_attention_mask,
+)
 from keras_hub.src.models.gemma3n.gemma3n_attention import Gemma3nTextAttention
 from keras_hub.src.models.gemma3n.gemma3n_text_layers import Gemma3nTextAltUp
 from keras_hub.src.models.gemma3n.gemma3n_text_layers import (
@@ -28,7 +34,10 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
         head_dim: int. The dimension of each attention head.
         attention_bias: bool. If `True`, attention layers will use a bias.
         attention_dropout: float. The dropout rate for the attention mechanism.
-        is_sliding: bool. If `True`, enables sliding window attention.
+        rope_max_wavelength: int. The maximum wavelength for the
+            rotary position embedding.
+        rope_scaling_factor: float. The scaling factor for the
+            rotary position embedding.
         sliding_window: int. The size of the sliding window for attention.
         intermediate_size: int. The size of the intermediate layer in the MLP.
         hidden_activation: str. The activation function for the MLP.
@@ -42,6 +51,8 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
         laurel_rank: int. The rank for the Laurel block.
         hidden_size_per_layer_input: int. The hidden size for the per-layer
             input projection.
+        is_kv_shared_layer: bool. Whether this layer reuses kv states from a
+            previous layer.
     """
 
     def __init__(
@@ -53,7 +64,8 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
         head_dim,
         attention_bias,
         attention_dropout,
-        is_sliding,
+        rope_max_wavelength,
+        rope_scaling_factor,
         sliding_window,
         intermediate_size,
         hidden_activation,
@@ -64,6 +76,7 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
         altup_correct_scale,
         laurel_rank,
         hidden_size_per_layer_input,
+        is_kv_shared_layer,
         dtype=None,
         **kwargs,
     ):
@@ -75,7 +88,8 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
         self.head_dim = head_dim
         self.attention_bias = attention_bias
         self.attention_dropout = attention_dropout
-        self.is_sliding = is_sliding
+        self.rope_max_wavelength = rope_max_wavelength
+        self.rope_scaling_factor = rope_scaling_factor
         self.sliding_window = sliding_window
         self.intermediate_size = intermediate_size
         self.hidden_activation = hidden_activation
@@ -86,6 +100,7 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
         self.altup_correct_scale = altup_correct_scale
         self.laurel_rank = laurel_rank
         self.hidden_size_per_layer_input = hidden_size_per_layer_input
+        self.is_kv_shared_layer = is_kv_shared_layer
         self.attention = Gemma3nTextAttention(
             hidden_size=hidden_size,
             num_attention_heads=num_attention_heads,
@@ -94,7 +109,10 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
             attention_dropout=attention_dropout,
             attention_bias=attention_bias,
             rms_norm_eps=rms_norm_eps,
-            sliding_window=sliding_window if is_sliding else None,
+            rope_max_wavelength=rope_max_wavelength,
+            rope_scaling_factor=rope_scaling_factor,
+            sliding_window=sliding_window,
+            is_kv_shared_layer=is_kv_shared_layer,
             name="attention",
             dtype=self.dtype_policy,
         )
@@ -169,8 +187,6 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
     def build(self, input_shape):
         (
             hidden_states_shape,
-            _,
-            _,
             per_layer_input_shape,
             _,
         ) = input_shape
@@ -193,6 +209,35 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
             self.act_fn = keras.activations.get(self.hidden_activation)
         super().build(input_shape)
 
+    def _compute_attention_mask(
+        self,
+        x,
+        padding_mask,
+        cache,
+        cache_update_index,
+    ):
+        decoder_mask = merge_padding_and_attention_mask(
+            inputs=x, padding_mask=padding_mask, attention_mask=None
+        )
+
+        batch_size = keras.ops.shape(x)[0]
+        input_length = output_length = keras.ops.shape(x)[1]
+        if cache is not None:
+            input_length = keras.ops.shape(cache)[3]
+
+        causal_mask = compute_causal_mask(
+            batch_size=batch_size,
+            input_length=input_length,
+            output_length=output_length,
+            cache_index=cache_update_index,
+        )
+
+        # Respect the padding mask.
+        if decoder_mask is not None:
+            causal_mask = keras.ops.minimum(decoder_mask, causal_mask)
+
+        return causal_mask
+
     def call(
         self,
         inputs,
@@ -203,24 +248,19 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
     ):
         (
             hidden_states,
-            position_embeddings_global,
-            position_embeddings_local,
             per_layer_input,
-            attention_mask,
+            padding_mask,
         ) = inputs
+        attention_mask = self._compute_attention_mask(
+            hidden_states[0], padding_mask, cache, cache_update_index
+        )
         predictions = self.altup.predict(hidden_states)
         active_prediction = predictions[self.altup_active_idx]
         active_prediction_normed = self.input_layernorm(active_prediction)
         laurel_output = self.laurel(active_prediction_normed)
-        position_embeddings = (
-            position_embeddings_local
-            if self.is_sliding
-            else position_embeddings_global
-        )
         if cache is not None:
             attn, _, new_cache = self.attention(
                 active_prediction_normed,
-                position_embeddings,
                 attention_mask,
                 cache=cache,
                 cache_update_index=cache_update_index,
@@ -228,9 +268,8 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
                 training=training,
             )
         else:
-            attn, _ = self.attention(
+            attn, _, new_cache = self.attention(
                 active_prediction_normed,
-                position_embeddings,
                 attention_mask,
                 training=training,
             )
@@ -269,9 +308,7 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
                 corrected_predictions_list[i] + first_prediction_normed
             )
         output = keras.ops.stack(corrected_predictions_list, axis=0)
-        if cache is not None:
-            return output, new_cache
-        return output
+        return output, new_cache
 
     def get_config(self):
         config = super().get_config()
@@ -284,7 +321,8 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
                 "head_dim": self.head_dim,
                 "attention_bias": self.attention_bias,
                 "attention_dropout": self.attention_dropout,
-                "is_sliding": self.is_sliding,
+                "rope_max_wavelength": self.rope_max_wavelength,
+                "rope_scaling_factor": self.rope_scaling_factor,
                 "sliding_window": self.sliding_window,
                 "intermediate_size": self.intermediate_size,
                 "hidden_activation": self.hidden_activation,
@@ -295,6 +333,7 @@ class Gemma3nTextDecoderBlock(keras.layers.Layer):
                 "altup_correct_scale": self.altup_correct_scale,
                 "laurel_rank": self.laurel_rank,
                 "hidden_size_per_layer_input": self.hidden_size_per_layer_input,
+                "is_kv_shared_layer": self.is_kv_shared_layer,
             }
         )
         return config

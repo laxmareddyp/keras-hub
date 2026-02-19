@@ -6,9 +6,6 @@ from keras_hub.src.models.gemma3n.gemma3n_text_decoder import (
     Gemma3nTextDecoderBlock,
 )
 from keras_hub.src.models.gemma3n.gemma3n_text_layers import (
-    Gemma3nTextRotaryEmbedding,
-)
-from keras_hub.src.models.gemma3n.gemma3n_text_layers import (
     Gemma3nTextScaledWordEmbedding,
 )
 from keras_hub.src.models.gemma3n.rms_normalization import Gemma3nRMSNorm
@@ -116,6 +113,9 @@ class Gemma3nTextModel(keras.layers.Layer):
         self.hidden_size_per_layer_input = hidden_size_per_layer_input
         self.vocab_size_per_layer_input = vocab_size_per_layer_input
         self.num_kv_shared_layers = num_kv_shared_layers
+        self.first_kv_shared_layer_idx = (
+            num_hidden_layers - num_kv_shared_layers
+        )
         self.padding_idx = pad_token_id
         self.embed_tokens = Gemma3nTextScaledWordEmbedding(
             vocab_size,
@@ -135,8 +135,13 @@ class Gemma3nTextModel(keras.layers.Layer):
                 head_dim,
                 attention_bias,
                 attention_dropout,
-                layer_types[i] == "sliding_attention",
-                sliding_window,
+                rope_local_base_freq
+                if layer_types[i] == "sliding_attention"
+                else rope_theta,
+                rope_scaling,
+                sliding_window
+                if layer_types[i] == "sliding_attention"
+                else None,
                 intermediate_size[i],
                 hidden_activation,
                 self.activation_sparsity_pattern[i],
@@ -146,6 +151,7 @@ class Gemma3nTextModel(keras.layers.Layer):
                 altup_correct_scale,
                 laurel_rank,
                 hidden_size_per_layer_input,
+                i >= self.first_kv_shared_layer_idx > 0,
                 name=f"decoder_block_{i}",
                 dtype=self.dtype_policy,
             )
@@ -153,22 +159,6 @@ class Gemma3nTextModel(keras.layers.Layer):
         ]
         self.final_normalization = Gemma3nRMSNorm(
             hidden_size, eps=rms_norm_eps, name="norm", dtype=self.dtype_policy
-        )
-        self.rotary_emb = Gemma3nTextRotaryEmbedding(
-            head_dim,
-            rope_theta,
-            max_position_embeddings,
-            rope_scaling,
-            dtype=self.dtype_policy,
-            name="rotary_emb",
-        )
-        self.rotary_emb_local = Gemma3nTextRotaryEmbedding(
-            head_dim,
-            rope_local_base_freq,
-            max_position_embeddings,
-            None,
-            dtype=self.dtype_policy,
-            name="rotary_emb_local",
         )
         self.embed_tokens_per_layer = Gemma3nTextScaledWordEmbedding(
             vocab_size_per_layer_input,
@@ -245,8 +235,6 @@ class Gemma3nTextModel(keras.layers.Layer):
         )
         decoder_input_shape = (
             decoder_hidden_states_shape,
-            None,  # position_embeddings_global
-            None,  # position_embeddings_local
             decoder_per_layer_input_shape,
             None,  # attention_mask
         )
@@ -299,7 +287,6 @@ class Gemma3nTextModel(keras.layers.Layer):
             logits = keras.ops.matmul(
                 inputs, keras.ops.transpose(embedding_weights)
             )
-            logits = logits / self.embed_tokens.embed_scale
             return logits
 
     def compute_output_shape(self, input_shape):
@@ -322,14 +309,7 @@ class Gemma3nTextModel(keras.layers.Layer):
         cache_update_index=0,
         cache_update_mask=None,
     ):
-        position_ids = keras.ops.expand_dims(
-            keras.ops.arange(0, keras.ops.shape(input_ids)[1]), 0
-        )
         hidden_states_0 = inputs_embeds
-        cos_global, sin_global = self.rotary_emb(hidden_states_0, position_ids)
-        cos_local, sin_local = self.rotary_emb_local(
-            hidden_states_0, position_ids
-        )
         target_magnitude = keras.ops.sqrt(
             keras.ops.mean(hidden_states_0**2, axis=-1, keepdims=True)
         )
@@ -346,16 +326,26 @@ class Gemma3nTextModel(keras.layers.Layer):
             current_hidden_state = altup_proj * target_magnitude / new_magnitude
             temp_hidden_states.append(current_hidden_state)
         hidden_states = keras.ops.stack(temp_hidden_states, axis=0)
+
+        new_caches = []
+        last_nonshared_layer_idx = {}
         if cache is not None:
-            caches = []
             for i, decoder_layer in enumerate(self.transformer_layers):
+                is_kv_shared_layer = i >= self.first_kv_shared_layer_idx > 0
+                layer_type = self.layer_types[i]
                 per_layer_input = per_layer_inputs[:, :, i, :]
-                current_cache = cache[:, i, ...]
+                if is_kv_shared_layer:
+                    # For shared layer, use kv cache from last
+                    # non-shared layer of the same type
+                    current_cache = new_caches[
+                        last_nonshared_layer_idx[layer_type]
+                    ]
+                else:
+                    current_cache = cache[:, i, ...]
+                    last_nonshared_layer_idx[layer_type] = i
                 hidden_states, new_cache = decoder_layer(
                     (
                         hidden_states,
-                        (cos_global, sin_global),
-                        (cos_local, sin_local),
                         per_layer_input,
                         attention_mask,
                     ),
@@ -363,20 +353,31 @@ class Gemma3nTextModel(keras.layers.Layer):
                     cache_update_index=cache_update_index,
                     cache_update_mask=cache_update_mask,
                 )
-                caches.append(new_cache)
-            cache = keras.ops.stack(caches, axis=1)
+                new_caches.append(new_cache)
+            cache = keras.ops.stack(new_caches, axis=1)
         else:
             for i, decoder_layer in enumerate(self.transformer_layers):
+                is_kv_shared_layer = i >= self.first_kv_shared_layer_idx > 0
+                layer_type = self.layer_types[i]
                 per_layer_input = per_layer_inputs[:, :, i, :]
-                hidden_states = decoder_layer(
+                if is_kv_shared_layer:
+                    # For shared layer, use kv cache from last
+                    # non-shared layer of the same type
+                    current_cache = new_caches[
+                        last_nonshared_layer_idx[layer_type]
+                    ]
+                else:
+                    current_cache = None
+                    last_nonshared_layer_idx[layer_type] = i
+                hidden_states, new_cache = decoder_layer(
                     (
                         hidden_states,
-                        (cos_global, sin_global),
-                        (cos_local, sin_local),
                         per_layer_input,
                         attention_mask,
-                    )
+                    ),
+                    cache=current_cache,
                 )
+                new_caches.append(new_cache)
         target_magnitude = keras.ops.sqrt(
             keras.ops.mean(hidden_states[0] ** 2, axis=-1, keepdims=True)
         )

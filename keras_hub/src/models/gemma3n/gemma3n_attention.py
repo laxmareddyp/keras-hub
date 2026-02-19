@@ -3,8 +3,7 @@ import math
 import keras
 import numpy as np
 
-from keras_hub.src.models.gemma3n.gemma3n_utils import apply_rotary_pos_emb
-from keras_hub.src.models.gemma3n.gemma3n_utils import eager_attention_forward
+from keras_hub.src.layers.modeling.rotary_embedding import RotaryEmbedding
 from keras_hub.src.models.gemma3n.rms_normalization import Gemma3nRMSNorm
 
 
@@ -241,9 +240,15 @@ class Gemma3nTextAttention(keras.layers.Layer):
         attention_bias: bool. If `True`, dense layers for query, key, value,
             and output projections will use a bias term.
         rms_norm_eps: float. The epsilon value for RMS Normalization layers.
+        rope_max_wavelength: int. The maximum wavelength for the
+            rotary position embedding. Defaults to 10000.
+        rope_scaling_factor: float. The scaling factor for the
+            rotary position embedding. Defaults to 1.0.
         sliding_window: int, optional. The size of the sliding window for
             local attention. If `None`, global attention is used. Defaults to
             `None`.
+        is_kv_shared_layer: bool. Whether this layer reuses kv states from a
+            previous layer.
     """
 
     def __init__(
@@ -255,7 +260,10 @@ class Gemma3nTextAttention(keras.layers.Layer):
         attention_dropout,
         attention_bias,
         rms_norm_eps,
+        rope_max_wavelength=10000,
+        rope_scaling_factor=1.0,
         sliding_window=None,
+        is_kv_shared_layer=False,
         dtype=None,
         **kwargs,
     ):
@@ -267,10 +275,13 @@ class Gemma3nTextAttention(keras.layers.Layer):
         self.attention_dropout = attention_dropout
         self.attention_bias = attention_bias
         self.rms_norm_eps = rms_norm_eps
+        self.rope_max_wavelength = rope_max_wavelength
+        self.rope_scaling_factor = rope_scaling_factor
         self.sliding_window = sliding_window
         self.num_key_value_groups = (
             self.num_attention_heads // self.num_key_value_heads
         )
+        self.is_kv_shared_layer = is_kv_shared_layer
         self.q_proj = keras.layers.Dense(
             self.num_attention_heads * self.head_dim,
             use_bias=self.attention_bias,
@@ -314,6 +325,11 @@ class Gemma3nTextAttention(keras.layers.Layer):
             name="v_norm",
             dtype=self.dtype_policy,
         )
+        self.rotary_embedding = RotaryEmbedding(
+            max_wavelength=rope_max_wavelength,
+            scaling_factor=rope_scaling_factor or 1.0,
+            dtype=self.dtype_policy,
+        )
 
     def build(self, input_shape):
         self.q_proj.build(input_shape)
@@ -335,10 +351,90 @@ class Gemma3nTextAttention(keras.layers.Layer):
         self.v_norm.build(k_norm_shape)
         super().build(input_shape)
 
+    def _mask_sliding_window(
+        self,
+        attention_mask,
+        cache_update_index=0,
+    ):
+        batch_size, query_len, key_len = keras.ops.shape(attention_mask)
+
+        # Compute the sliding window for square attention.
+        all_ones = keras.ops.ones((key_len, key_len), "bool")
+        if keras.config.backend() == "tensorflow":
+            # TODO: trui/tril has issues with dynamic shape on the tensorflow
+            # backend. We should fix, but use `band_part` for now.
+            import tensorflow as tf
+
+            band_size = keras.ops.minimum(key_len, self.sliding_window - 1)
+            band_size = keras.ops.cast(band_size, "int32")
+            sliding_mask = tf.linalg.band_part(all_ones, band_size, band_size)
+        else:
+            sliding_mask = keras.ops.triu(
+                all_ones, -1 * self.sliding_window + 1
+            ) * keras.ops.tril(all_ones, self.sliding_window - 1)
+        # Slice the window for short queries during generation.
+        start = (cache_update_index, 0)
+        sliding_mask = keras.ops.slice(
+            sliding_mask, start, (query_len, key_len)
+        )
+        sliding_mask = keras.ops.expand_dims(sliding_mask, 0)
+        return keras.ops.logical_and(
+            attention_mask, keras.ops.cast(sliding_mask, "bool")
+        )
+
+    def repeat_kv(self, hidden_states):
+        if self.num_key_value_groups == 1:
+            return hidden_states
+        batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+        hidden_states = keras.ops.expand_dims(hidden_states, 2)
+        hidden_states = keras.ops.repeat(
+            hidden_states, self.num_key_value_groups, axis=2
+        )
+        return keras.ops.reshape(
+            hidden_states,
+            (
+                batch,
+                num_key_value_heads * self.num_key_value_groups,
+                slen,
+                head_dim,
+            ),
+        )
+
+    def _compute_attention(
+        self,
+        query,
+        key,
+        value,
+        attention_mask,
+        dropout=0.0,
+        training=False,
+    ):
+        scaling = self.head_dim**-0.5
+        key_states = self.repeat_kv(key)
+        value_states = self.repeat_kv(value)
+        attn_weights = (
+            keras.ops.matmul(
+                query, keras.ops.transpose(key_states, (0, 1, 3, 2))
+            )
+            * scaling
+        )
+        if attention_mask is not None:
+            mask = keras.ops.expand_dims(attention_mask, axis=1)
+            mask = mask[:, :, :, : key_states.shape[-2]]
+            mask = keras.ops.cast(mask, "bool")
+            attn_weights = keras.ops.where(mask, attn_weights, -1e9)
+        attn_weights = keras.ops.softmax(attn_weights, axis=-1)
+        if training:
+            attn_weights = keras.layers.Dropout(dropout)(
+                attn_weights, training=training
+            )
+        attn_output = keras.ops.matmul(attn_weights, value_states)
+        attn_output = keras.ops.transpose(attn_output, (0, 2, 1, 3))
+        return attn_output, attn_weights
+
     def call(
         self,
         hidden_states,
-        position_embeddings,
         attention_mask,
         cache=None,
         cache_update_index=0,
@@ -346,7 +442,9 @@ class Gemma3nTextAttention(keras.layers.Layer):
         training=False,
     ):
         input_shape = keras.ops.shape(hidden_states)[:-1]
-        cos, sin = position_embeddings
+        start_index = (
+            cache_update_index if cache_update_index is not None else 0
+        )
 
         query_states = self.q_proj(hidden_states)
         query_states = keras.ops.reshape(
@@ -354,11 +452,14 @@ class Gemma3nTextAttention(keras.layers.Layer):
             input_shape + (self.num_attention_heads, self.head_dim),
         )
         query_states = self.q_norm(query_states)
-        query_states = apply_rotary_pos_emb(
-            query_states, cos, sin, unsqueeze_dim=2
+        query_states = self.rotary_embedding(
+            query_states, start_index=start_index
         )
         query_states = keras.ops.transpose(query_states, (0, 2, 1, 3))
-        if cache is not None:
+        if self.is_kv_shared_layer:
+            key_states = cache[:, 0, ...]
+            value_states = cache[:, 1, ...]
+        elif cache is not None:
             key_cache = cache[:, 0, ...]
             value_cache = cache[:, 1, ...]
             key_update = self.k_proj(hidden_states)
@@ -367,8 +468,8 @@ class Gemma3nTextAttention(keras.layers.Layer):
                 input_shape + (self.num_key_value_heads, self.head_dim),
             )
             key_update = self.k_norm(key_update)
-            key_update = apply_rotary_pos_emb(
-                key_update, cos, sin, unsqueeze_dim=2
+            key_update = self.rotary_embedding(
+                key_update, start_index=start_index
             )
             key_update = keras.ops.transpose(key_update, (0, 2, 1, 3))
             value_update = self.v_proj(hidden_states)
@@ -412,8 +513,8 @@ class Gemma3nTextAttention(keras.layers.Layer):
                 input_shape + (self.num_key_value_heads, self.head_dim),
             )
             key_states = self.k_norm(key_states)
-            key_states = apply_rotary_pos_emb(
-                key_states, cos, sin, unsqueeze_dim=2
+            key_states = self.rotary_embedding(
+                key_states, start_index=start_index
             )
             key_states = keras.ops.transpose(key_states, (0, 2, 1, 3))
             value_states = self.v_proj(hidden_states)
@@ -423,22 +524,23 @@ class Gemma3nTextAttention(keras.layers.Layer):
             )
             value_states = self.v_norm(value_states)
             value_states = keras.ops.transpose(value_states, (0, 2, 1, 3))
-        attn_output, attn_weights = eager_attention_forward(
+            cache = keras.ops.stack((key_states, value_states), axis=1)
+        if self.sliding_window is not None and attention_mask is not None:
+            attention_mask = self._mask_sliding_window(
+                attention_mask,
+                cache_update_index=cache_update_index,
+            )
+        attn_output, attn_weights = self._compute_attention(
             query_states,
             key_states,
             value_states,
-            self.num_key_value_groups,
-            self.head_dim,
             attention_mask,
             dropout=self.attention_dropout if training else 0.0,
-            scaling=1.0,
             training=training,
         )
         attn_output = keras.ops.reshape(attn_output, input_shape + (-1,))
         attn_output = self.o_proj(attn_output)
-        if cache is not None:
-            return attn_output, attn_weights, cache
-        return attn_output, attn_weights
+        return attn_output, attn_weights, cache
 
     def get_config(self):
         config = super().get_config()
@@ -451,7 +553,10 @@ class Gemma3nTextAttention(keras.layers.Layer):
                 "attention_dropout": self.attention_dropout,
                 "attention_bias": self.attention_bias,
                 "rms_norm_eps": self.rms_norm_eps,
+                "rope_max_wavelength": self.rope_max_wavelength,
+                "rope_scaling_factor": self.rope_scaling_factor,
                 "sliding_window": self.sliding_window,
+                "is_kv_shared_layer": self.is_kv_shared_layer,
             }
         )
         return config

@@ -784,9 +784,8 @@ def validate_output(keras_model, hf_model, hf_processor):
         padding="longest",
     )
     print("  -> Running HF model forward pass...")
-    with torch.no_grad():
-        hf_output = hf_model.model(**hf_inputs).last_hidden_state
-        hf_output = hf_output.detach().cpu().float().numpy()
+    hf_output = hf_model.model(**hf_inputs).last_hidden_state
+    hf_output = hf_model.lm_head(hf_output).detach().cpu().float().numpy()
     print(f"  -> HF model output shape: {hf_output.shape}")
     keras_inputs = {k: v.numpy() for k, v in hf_inputs.items()}
     backbone_keras_inputs = {}
@@ -805,6 +804,8 @@ def validate_output(keras_model, hf_model, hf_processor):
     # Audio.
     input_features = keras_inputs.pop("input_features")
     input_features_mask = keras_inputs.pop("input_features_mask")
+    # mask is inverted compared to what the Keras model expects
+    input_features_mask = ~input_features_mask
     if input_features.ndim == 3:
         input_features = np.expand_dims(input_features, axis=1)
     if input_features_mask.ndim == 2:
@@ -812,7 +813,10 @@ def validate_output(keras_model, hf_model, hf_processor):
     backbone_keras_inputs["input_features"] = input_features
     backbone_keras_inputs["input_features_mask"] = input_features_mask
     print("  -> Running Keras model forward pass...")
-    keras_output = keras_model.predict(backbone_keras_inputs)
+    keras_output = keras_model(backbone_keras_inputs)
+    keras_output = keras_model.language_model.token_embedding(
+        keras_output, reverse=True
+    )
     print(f"  -> Keras model output shape: {keras_output.shape}")
     mean_diff = np.mean(np.abs(keras_output - hf_output))
     print(f"🔶 Mean absolute difference: {mean_diff}")

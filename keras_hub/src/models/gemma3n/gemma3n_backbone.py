@@ -813,11 +813,9 @@ class Gemma3nBackbone(Backbone):
         # === Decoder layers ===
         # The Gemma3nTextModel encapsulates the decoder loop and final norm.
         # It requires `input_ids` for its internal per-layer logic.
-        attention_mask = keras.ops.expand_dims(padding_mask_input, axis=1)
-        attention_mask = keras.ops.expand_dims(attention_mask, axis=1)
         sequence_output = self.language_model(
             token_ids_input,
-            attention_mask,
+            padding_mask_input,
             final_embeds,
             per_layer_inputs,
         )

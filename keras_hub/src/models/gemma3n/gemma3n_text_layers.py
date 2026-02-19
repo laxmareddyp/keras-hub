@@ -1,5 +1,4 @@
 import keras
-import numpy as np
 
 from keras_hub.src.models.gemma3n.rms_normalization import Gemma3nRMSNorm
 
@@ -51,79 +50,6 @@ class Gemma3nTextScaledWordEmbedding(keras.layers.Layer):
                 "num_embeddings": self.num_embeddings,
                 "embedding_dim": self.embedding_dim,
                 "embed_scale": self.embed_scale,
-            }
-        )
-        return config
-
-
-class Gemma3nTextRotaryEmbedding(keras.layers.Layer):
-    """A layer that computes rotary positional embeddings for Gemma3n models.
-
-    This layer calculates the cosine and sine matrices for Rotary Positional
-    Embedding (RoPE), which are then applied to query and key tensors in the
-    attention mechanism to inject positional information.
-
-    Args:
-        head_dim: int. The dimension of each attention head.
-        rope_theta: float. The base for the rotary frequency.
-        max_position_embeddings: int. The maximum sequence length that this
-            model might be used with.
-        rope_scaling: dict or `None`. Specifies the scaling strategy for RoPE.
-        base: float. The base value for the inverse frequency calculation.
-    """
-
-    def __init__(
-        self,
-        head_dim,
-        rope_theta,
-        max_position_embeddings,
-        rope_scaling,
-        base=10000,
-        dtype=None,
-        **kwargs,
-    ):
-        super().__init__(dtype=dtype, **kwargs)
-        self.head_dim = head_dim
-        self.rope_theta = rope_theta
-        self.max_position_embeddings = max_position_embeddings
-        self.rope_scaling = rope_scaling
-        self.base = base
-        inv_freq = 1.0 / (
-            self.base
-            ** (np.arange(0, self.head_dim, 2, dtype="float32") / self.head_dim)
-        )
-        self.inv_freq = keras.ops.convert_to_tensor(inv_freq)
-        self.attention_scaling = 1.0
-
-    def call(self, x, position_ids):
-        inv_freq_expanded = keras.ops.expand_dims(
-            keras.ops.expand_dims(self.inv_freq, 0), -1
-        )
-        inv_freq_expanded = keras.ops.repeat(
-            inv_freq_expanded, repeats=keras.ops.shape(position_ids)[0], axis=0
-        )
-        position_ids_expanded = keras.ops.expand_dims(
-            keras.ops.cast(position_ids, "float32"), 1
-        )
-
-        freqs = keras.ops.transpose(
-            keras.ops.matmul(inv_freq_expanded, position_ids_expanded),
-            (0, 2, 1),
-        )
-        emb = keras.ops.concatenate([freqs, freqs], axis=-1)
-        cos = keras.ops.cos(emb) * self.attention_scaling
-        sin = keras.ops.sin(emb) * self.attention_scaling
-        return keras.ops.cast(cos, x.dtype), keras.ops.cast(sin, x.dtype)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "head_dim": self.head_dim,
-                "rope_theta": self.rope_theta,
-                "max_position_embeddings": self.max_position_embeddings,
-                "rope_scaling": self.rope_scaling,
-                "base": self.base,
             }
         )
         return config
