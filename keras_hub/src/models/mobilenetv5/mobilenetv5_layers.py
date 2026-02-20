@@ -268,13 +268,17 @@ class ConvNormAct(keras.layers.Layer):
                 gamma_initializer="ones",
                 dtype=self.dtype_policy,
             )
-        else:
+        elif norm_layer == "layer_norm":
             ln_axis = [1, 2, 3]
             if self.data_format == "channels_first":
                 ln_axis = [2, 3, 1]
             self.norm = keras.layers.LayerNormalization(
                 axis=ln_axis,
                 dtype=self.dtype_policy,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported norm_layer in ConvNormAct: {norm_layer}"
             )
 
         if self.apply_act:

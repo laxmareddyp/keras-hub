@@ -636,6 +636,7 @@ class Gemma3nBackbone(Backbone):
         altup_active_idx=0,
         altup_correct_scale=True,
         num_kv_shared_layers=0,
+        final_logit_soft_cap=None,
         vision_encoder_config=None,
         vision_hidden_size=2048,
         vision_vocab_size=128,
@@ -719,6 +720,7 @@ class Gemma3nBackbone(Backbone):
             hidden_size_per_layer_input=hidden_size_per_layer_input,
             vocab_size_per_layer_input=vocab_size_per_layer_input,
             num_kv_shared_layers=num_kv_shared_layers,
+            final_logit_soft_cap=final_logit_soft_cap,
             dtype=dtype,
             name="text_model",
         )
@@ -854,6 +856,7 @@ class Gemma3nBackbone(Backbone):
         self.altup_active_idx = altup_active_idx
         self.altup_correct_scale = altup_correct_scale
         self.num_kv_shared_layers = num_kv_shared_layers
+        self.final_logit_soft_cap = final_logit_soft_cap
         self.vision_encoder_config = vision_encoder_config
         self.vision_hidden_size = vision_hidden_size
         self.vision_vocab_size = vision_vocab_size
@@ -898,6 +901,7 @@ class Gemma3nBackbone(Backbone):
                 "altup_active_idx": self.altup_active_idx,
                 "altup_correct_scale": self.altup_correct_scale,
                 "num_kv_shared_layers": self.num_kv_shared_layers,
+                "final_logit_soft_cap": self.final_logit_soft_cap,
                 "vision_encoder_config": self.vision_encoder_config,
                 "vision_hidden_size": self.vision_hidden_size,
                 "vision_vocab_size": self.vision_vocab_size,

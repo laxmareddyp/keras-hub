@@ -82,6 +82,7 @@ class Gemma3nTextModel(keras.layers.Layer):
         hidden_size_per_layer_input,
         vocab_size_per_layer_input,
         num_kv_shared_layers,
+        final_logit_soft_cap=None,
         dtype=None,
         **kwargs,
     ):
@@ -113,6 +114,7 @@ class Gemma3nTextModel(keras.layers.Layer):
         self.hidden_size_per_layer_input = hidden_size_per_layer_input
         self.vocab_size_per_layer_input = vocab_size_per_layer_input
         self.num_kv_shared_layers = num_kv_shared_layers
+        self.final_logit_soft_cap = final_logit_soft_cap
         self.first_kv_shared_layer_idx = (
             num_hidden_layers - num_kv_shared_layers
         )
@@ -287,6 +289,10 @@ class Gemma3nTextModel(keras.layers.Layer):
             logits = keras.ops.matmul(
                 inputs, keras.ops.transpose(embedding_weights)
             )
+            if self.final_logit_soft_cap is not None:
+                logits = logits / self.final_logit_soft_cap
+                logits = keras.ops.tanh(logits)
+                logits = logits * self.final_logit_soft_cap
             return logits
 
     def compute_output_shape(self, input_shape):
@@ -432,6 +438,7 @@ class Gemma3nTextModel(keras.layers.Layer):
                 "hidden_size_per_layer_input": self.hidden_size_per_layer_input,
                 "vocab_size_per_layer_input": self.vocab_size_per_layer_input,
                 "num_kv_shared_layers": self.num_kv_shared_layers,
+                "final_logit_soft_cap": self.final_logit_soft_cap,
             }
         )
         return config

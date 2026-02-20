@@ -409,7 +409,7 @@ class Gemma3nTextAttention(keras.layers.Layer):
         dropout=0.0,
         training=False,
     ):
-        scaling = self.head_dim**-0.5
+        scaling = 1.0
         key_states = self.repeat_kv(key)
         value_states = self.repeat_kv(value)
         attn_weights = (
