@@ -211,6 +211,12 @@ from keras_hub.src.models.distil_bert.distil_bert_text_classifier_preprocessor i
 from keras_hub.src.models.distil_bert.distil_bert_tokenizer import (
     DistilBertTokenizer as DistilBertTokenizer,
 )
+from keras_hub.src.models.edrec.edrec_backbone import (
+    EdRecBackbone as EdRecBackbone,
+)
+from keras_hub.src.models.edrec.edrec_seq2seq_lm import (
+    EdRecSeq2SeqLM as EdRecSeq2SeqLM,
+)
 from keras_hub.src.models.efficientnet.efficientnet_backbone import (
     EfficientNetBackbone as EfficientNetBackbone,
 )
@@ -641,12 +647,33 @@ from keras_hub.src.models.roformer_v2.roformer_v2_text_classifier_preprocessor i
 from keras_hub.src.models.roformer_v2.roformer_v2_tokenizer import (
     RoformerV2Tokenizer as RoformerV2Tokenizer,
 )
+from keras_hub.src.models.rwkv7.rwkv7_backbone import (
+    RWKV7Backbone as RWKV7Backbone,
+)
+from keras_hub.src.models.rwkv7.rwkv7_causal_lm import (
+    RWKV7CausalLM as RWKV7CausalLM,
+)
+from keras_hub.src.models.rwkv7.rwkv7_causal_lm_preprocessor import (
+    RWKV7CausalLMPreprocessor as RWKV7CausalLMPreprocessor,
+)
 from keras_hub.src.models.sam.sam_backbone import SAMBackbone as SAMBackbone
 from keras_hub.src.models.sam.sam_image_segmenter import (
     SAMImageSegmenter as SAMImageSegmenter,
 )
 from keras_hub.src.models.sam.sam_image_segmenter_preprocessor import (
     SAMImageSegmenterPreprocessor as SAMImageSegmenterPreprocessor,
+)
+from keras_hub.src.models.sam3.sam3_pc_backbone import (
+    SAM3PromptableConceptBackbone as SAM3PromptableConceptBackbone,
+)
+from keras_hub.src.models.sam3.sam3_pc_image_segmenter import (
+    SAM3PromptableConceptImageSegmenter as SAM3PromptableConceptImageSegmenter,
+)
+from keras_hub.src.models.sam3.sam3_pc_image_segmenter_preprocessor import (
+    SAM3PromptableConceptImageSegmenterPreprocessor as SAM3PromptableConceptImageSegmenterPreprocessor,
+)
+from keras_hub.src.models.sam3.sam3_tokenizer import (
+    SAM3Tokenizer as SAM3Tokenizer,
 )
 from keras_hub.src.models.segformer.segformer_backbone import (
     SegFormerBackbone as SegFormerBackbone,
@@ -750,6 +777,12 @@ from keras_hub.src.models.vgg.vgg_image_classifier import (
 )
 from keras_hub.src.models.vgg.vgg_image_classifier_preprocessor import (
     VGGImageClassifierPreprocessor as VGGImageClassifierPreprocessor,
+)
+from keras_hub.src.models.video_prism.video_prism_backbone import (
+    VideoPrismBackbone as VideoPrismBackbone,
+)
+from keras_hub.src.models.video_prism.video_prism_tokenizer import (
+    VideoPrismTokenizer as VideoPrismTokenizer,
 )
 from keras_hub.src.models.vit.vit_backbone import ViTBackbone as ViTBackbone
 from keras_hub.src.models.vit.vit_image_classifier import (

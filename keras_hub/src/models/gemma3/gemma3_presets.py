@@ -181,12 +181,25 @@ backbone_presets = {
         },
         "kaggle_handle": "kaggle://keras/gemma3/keras/gemma3_instruct_270m/4",
     },
+    "medgemma_4b": {
+        "metadata": {
+            "description": (
+                "A 4 billion parameter model based on Gemma 3. "
+                "This model is pre-trained for performance on medical text "
+                "and image comprehension and is optimized for medical "
+                "applications that involve a text generation component."
+            ),
+            "params": 4300079472,
+            "path": "gemma3",
+        },
+        "kaggle_handle": "kaggle://keras/medgemma/keras/medgemma_4b/1",
+    },
     "medgemma_instruct_4b": {
         "metadata": {
             "description": (
                 "A 4 billion parameter model based on Gemma 3. "
-                "This model is trained for performance on medical text"
-                "and image comprehension and is optimized for medical"
+                "This model is instruction-tuned for performance on medical "
+                "text and image comprehension and is optimized for medical "
                 "applications that involve a text generation component."
             ),
             "params": 4300079472,
@@ -198,8 +211,8 @@ backbone_presets = {
         "metadata": {
             "description": (
                 "A 27 billion parameter model based on Gemma 3. "
-                "This model trained for performance on medical text "
-                "and image comprehension and is optimized for medical "
+                "This model is instruction-tuned for performance on medical "
+                " text and image comprehension and is optimized for medical "
                 "applications that involve a text generation component."
             ),
             "params": 27432406640,
@@ -211,14 +224,25 @@ backbone_presets = {
         "metadata": {
             "description": (
                 "A 27 billion parameter text-only model based on Gemma 3. "
-                "This model is trained for performance on medical text "
-                "comprehension and is optimized for medical applications "
-                "that involve a text generation component."
+                "This model is instruction-tuned (No images) for performance "
+                "on medical text comprehension and is optimized for medical "
+                "applications that involve a text generation component."
             ),
             "params": 27009002240,
             "path": "gemma3",
         },
         "kaggle_handle": "kaggle://keras/medgemma/keras/medgemma_instruct_27b_text/1",
+    },
+    "medgemma_1.5_instruct_4b": {
+        "metadata": {
+            "description": (
+                "A 4 billion parameter,Instruct-tuned MedGemma 1.5 4B is an "
+                "updated version of the Instruction-tuned MedGemma 4B model."
+            ),
+            "params": 4300079472,
+            "path": "gemma3",
+        },
+        "kaggle_handle": "kaggle://keras/medgemma/keras/medgemma_1.5_instruct_4b/1",
     },
     "function_gemma_instruct_270m": {
         "metadata": {
@@ -231,5 +255,52 @@ backbone_presets = {
             "path": "gemma3",
         },
         "kaggle_handle": "kaggle://keras/function-gemma/keras/function_gemma_instruct_270m/1",
+    },
+    "translategemma_4b_it": {
+        "metadata": {
+            "description": (
+                "4 billion parameter, 34-layer, multimodal instruction-tuned "
+                "translation model based on Gemma 3. Supports text and image "
+                "input for translation across 55 languages."
+            ),
+            "params": 4299915632,
+            "path": "gemma3",
+        },
+        "kaggle_handle": "kaggle://keras/translategemma/keras/translategemma_4b_it/1",
+    },
+    "translategemma_12b_it": {
+        "metadata": {
+            "description": (
+                "12 billion parameter, 48-layer, multimodal instruction-tuned "
+                "translation model based on Gemma 3. Supports text and image "
+                "input for translation across 55 languages."
+            ),
+            "params": 12187079280,
+            "path": "gemma3",
+        },
+        "kaggle_handle": "kaggle://keras/translategemma/keras/translategemma_12b_it/1",
+    },
+    "translategemma_27b_it": {
+        "metadata": {
+            "description": (
+                "27 billion parameter, 62-layer, multimodal instruction-tuned "
+                "translation model based on Gemma 3. Supports text and image "
+                "input for translation across 55 languages."
+            ),
+            "params": 27432062576,
+            "path": "gemma3",
+        },
+        "kaggle_handle": "kaggle://keras/translategemma/keras/translategemma_27b_it/1",
+    },
+    # Embedding Gemma presets
+    "embedding_gemma3_300m": {
+        "metadata": {
+            "description": (
+                "Embedding-focused Gemma 3 model (300M parameters, 24 layers)."
+            ),
+            "params": 307581696,
+            "path": "gemma3",
+        },
+        "kaggle_handle": "kaggle://keras/embeddinggemma/keras/embedding_gemma3_300m/2",
     },
 }
