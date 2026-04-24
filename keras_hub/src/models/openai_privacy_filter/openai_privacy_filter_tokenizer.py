@@ -1,5 +1,3 @@
-"""Tokenizer for OpenAI Privacy Filter models."""
-
 from keras_hub.src.api_export import keras_hub_export
 from keras_hub.src.models.openai_privacy_filter.openai_privacy_filter_backbone import (  # noqa: E501
     OpenAIPrivacyFilterBackbone,

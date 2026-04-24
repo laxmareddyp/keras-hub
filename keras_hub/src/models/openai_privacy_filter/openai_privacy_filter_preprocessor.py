@@ -1,4 +1,4 @@
-"""Preprocessor for OpenAI Privacy Filter models."""
+import keras
 
 from keras_hub.src.api_export import keras_hub_export
 from keras_hub.src.layers.preprocessing.multi_segment_packer import (
@@ -43,29 +43,42 @@ class OpenAIPrivacyFilterPreprocessor(Preprocessor):
         super().__init__(**kwargs)
         self.tokenizer = tokenizer
         self.packer = None
-        self.sequence_length = sequence_length
+        self._sequence_length = sequence_length
         self.truncate = truncate
 
     def build(self, input_shape):
         super().build(input_shape)
+        # Use pad_token_id for start/end/sep since this encoder model
+        # does not use special start/end tokens.
+        pad_id = self.tokenizer.pad_token_id
         self.packer = MultiSegmentPacker(
-            start_value=self.tokenizer.start_token_id,
-            end_value=self.tokenizer.pad_token_id,
-            pad_value=self.tokenizer.pad_token_id,
+            start_value=pad_id,
+            end_value=pad_id,
+            pad_value=pad_id,
             truncate=self.truncate,
             sequence_length=self.sequence_length,
         )
 
     def call(self, x, y=None, sample_weight=None, sequence_length=None):
-        sequence_length = sequence_length or self.sequence_length
-        token_ids, segment_ids = self.packer(
-            self.tokenizer(x), sequence_length=sequence_length
-        )
+        x = x if isinstance(x, tuple) else (x,)
+        x = tuple(self.tokenizer(segment) for segment in x)
+        token_ids, segment_ids = self.packer(x, sequence_length=sequence_length)
         x = {
             "token_ids": token_ids,
             "padding_mask": token_ids != self.tokenizer.pad_token_id,
         }
-        return x, y, sample_weight
+        return keras.utils.pack_x_y_sample_weight(x, y, sample_weight)
+
+    @property
+    def sequence_length(self):
+        """The padded length of model input sequences."""
+        return self._sequence_length
+
+    @sequence_length.setter
+    def sequence_length(self, value):
+        self._sequence_length = value
+        if self.packer is not None:
+            self.packer.sequence_length = value
 
     def get_config(self):
         config = super().get_config()
