@@ -30,22 +30,25 @@ _VISION_CONFIGS = {
 
 def convert_backbone_config(transformers_config):
     """Build KerasHub config from the HF config.json."""
+    # Vision architecture params (depth, num_heads, mlp_ratio) are not
+    # stored in config.json — they are implicit in the vision_fn factory
+    # function name, so we need a lookup table.
     vision_fn = transformers_config["vision_fn"]
     embed_dim, depth, num_heads, mlp_ratio = _VISION_CONFIGS[vision_fn]
 
-    img_size = transformers_config.get("img_size", 448)
-    patch_size = transformers_config.get("patch_size", 14)
-    ffn_layer = transformers_config.get("ffn_layer", "mlp")
-    init_values = transformers_config.get("init_values", 1.0)
-    num_register_tokens = transformers_config.get("num_register_tokens", 1)
+    img_size = transformers_config["img_size"]
+    patch_size = transformers_config["patch_size"]
+    ffn_layer = transformers_config["ffn_layer"]
+    init_values = transformers_config["init_values"]
+    num_register_tokens = transformers_config["num_register_tokens"]
 
-    text_hidden_size = transformers_config.get("text_hidden_size", embed_dim)
-    text_mlp_dim = transformers_config.get("text_mlp_dim", 4 * text_hidden_size)
-    text_num_heads = transformers_config.get("text_num_heads", 12)
-    text_num_layers = transformers_config.get("text_num_layers", 12)
-    vocab_size = transformers_config.get("vocab_size", 32000)
-    max_len = transformers_config.get("max_len", 64)
-    temperature = transformers_config.get("temperature", 0.01)
+    text_hidden_size = transformers_config["text_hidden_size"]
+    text_mlp_dim = transformers_config["text_mlp_dim"]
+    text_num_heads = transformers_config["text_num_heads"]
+    text_num_layers = transformers_config["text_num_layers"]
+    vocab_size = transformers_config["vocab_size"]
+    max_len = transformers_config["max_len"]
+    temperature = transformers_config["temperature"]
 
     vision_encoder = TIPSv2VisionEncoder(
         patch_size=patch_size,

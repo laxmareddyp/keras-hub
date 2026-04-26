@@ -12,17 +12,26 @@ python tools/checkpoint_conversion/convert_tipsv2_checkpoints.py \
 
 import gc
 import os
+from io import BytesIO
 
 os.environ["KERAS_BACKEND"] = "torch"
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 import numpy as np
+import requests
 import torch
 from absl import app
 from absl import flags
+from huggingface_hub import hf_hub_download
 from keras import ops
+from PIL import Image
+from transformers import AutoModel
 
 import keras_hub
+from keras_hub.src.models.tipsv2.tipsv2_image_converter import (
+    TIPSv2ImageConverter,
+)
+from keras_hub.src.models.tipsv2.tipsv2_tokenizer import TIPSv2Tokenizer
 
 FLAGS = flags.FLAGS
 
@@ -32,6 +41,12 @@ PRESET_MAP = {
     "tipsv2_so400m14": "google/tipsv2-so400m14",
     "tipsv2_g14": "google/tipsv2-g14",
 }
+
+TEXT_PROMPT = "a photo of a cat"
+MAX_SEQ_LEN = 64
+SAMPLE_IMAGE_URL = (
+    "https://storage.googleapis.com/keras-cv/models/paligemma/cow_beach_1.png"
+)
 
 flags.DEFINE_string(
     "preset",
@@ -50,7 +65,7 @@ flags.DEFINE_string(
 # ---------------------------------------------------------------
 # 1. Precompute HF outputs (before freeing HF model)
 # ---------------------------------------------------------------
-def precompute_hf_outputs(hf_model):
+def precompute_hf_outputs(hf_model, img_np, token_ids, padding_mask):
     """Precompute HF outputs for both encoders.
 
     Runs all HF forward passes, returning results as numpy arrays.
@@ -59,9 +74,6 @@ def precompute_hf_outputs(hf_model):
     results = {}
 
     # --- Vision encoder ---
-    np.random.seed(42)
-    img_np = np.random.rand(1, 448, 448, 3).astype("float32")
-
     # HF expects (B, C, H, W).
     img_torch = torch.from_numpy(img_np.transpose(0, 3, 1, 2))
     with torch.no_grad():
@@ -74,18 +86,14 @@ def precompute_hf_outputs(hf_model):
 
     # --- Text encoder ---
     # HF convention: paddings=1 means padding, 0 means valid.
-    token_ids = np.array([[3, 24, 506, 18, 9, 1423, 0, 0]], dtype="int64")
-    hf_paddings = np.array([[0, 0, 0, 0, 0, 0, 1, 1]], dtype="int32")
-
+    hf_paddings = 1 - padding_mask  # Invert KerasHub mask for HF.
     with torch.no_grad():
         hf_text = hf_model.encode_text(
-            torch.from_numpy(token_ids),
-            padding_mask=torch.from_numpy(hf_paddings),
+            torch.from_numpy(token_ids.astype("int64")),
+            padding_mask=torch.from_numpy(hf_paddings.astype("int32")),
         )
     results["text_token_ids"] = token_ids
-    results["text_padding_mask"] = np.array(
-        [[1, 1, 1, 1, 1, 1, 0, 0]], dtype="int32"
-    )  # KerasHub convention: 1=valid, 0=padding.
+    results["text_padding_mask"] = padding_mask
     results["text_embedding"] = hf_text.cpu().numpy()
 
     return results
@@ -113,7 +121,7 @@ def validate_output(keras_backbone, hf_results):
         keras_val = ops.convert_to_numpy(keras_out[keras_key])
         mse = np.mean((hf_val - keras_val) ** 2)
         max_diff = np.max(np.abs(hf_val - keras_val))
-        print(f"\n  Vision {name} (shape={keras_val.shape}):")
+        print(f"\n  Vision {name} via Encoder (shape={keras_val.shape}):")
         print(f"    🔶 HF output:      {hf_val.flatten()[:5]}")
         print(f"    🔶 KerasHub output: {keras_val.flatten()[:5]}")
         print(f"    MSE={mse:.2e}, max_diff={max_diff:.2e}")
@@ -135,7 +143,7 @@ def validate_output(keras_backbone, hf_results):
     hf_text = hf_results["text_embedding"]
     mse = np.mean((hf_text - keras_text) ** 2)
     max_diff = np.max(np.abs(hf_text - keras_text))
-    print(f"\n  Text embedding (shape={keras_text.shape}):")
+    print(f"\n  Text embedding via Encoder (shape={keras_text.shape}):")
     print(f"    🔶 HF output:      {hf_text.flatten()[:5]}")
     print(f"    🔶 KerasHub output: {keras_text.flatten()[:5]}")
     print(f"    MSE={mse:.2e}, max_diff={max_diff:.2e}")
@@ -144,17 +152,18 @@ def validate_output(keras_backbone, hf_results):
         print("    ✓ Matches within atol=1e-4.")
     except AssertionError as e:
         print(f"    ⚠ Mismatch: {e}")
-
     print("\n✅ Numerical parity validated.")
 
 
 # ---------------------------------------------------------------
 # 3. Save preset
 # ---------------------------------------------------------------
-def save_preset(keras_model, preset_name):
+def save_preset(keras_model, tokenizer, image_converter, preset_name):
     """Save the converted model as a KerasHub preset."""
     print(f"\n-> Saving KerasHub preset to ./{preset_name}...")
     keras_model.save_to_preset(f"./{preset_name}")
+    tokenizer.save_to_preset(f"./{preset_name}")
+    image_converter.save_to_preset(f"./{preset_name}")
     print(f"  ✓ Preset saved to ./{preset_name}")
 
 
@@ -171,20 +180,57 @@ def main(_):
 
     hf_preset = PRESET_MAP[preset]
 
-    # --- Phase 1: Load HF model and precompute all outputs ---
-    print("-> Loading HF reference model...")
-    from transformers import AutoModel
+    # --- Phase 1: Build tokenizer and tokenize sample text ---
+    print("-> Building tokenizer...")
+    tokenizer_path = hf_hub_download(hf_preset, "tokenizer.model")
+    tokenizer = TIPSv2Tokenizer(proto=tokenizer_path)
+    print(f"   Tokenizer vocab size: {tokenizer.vocabulary_size()}")
 
+    # Tokenize sample text for validation.
+    token_ids_ragged = tokenizer(TEXT_PROMPT)
+    token_ids_np = ops.convert_to_numpy(token_ids_ragged)
+    seq_len = len(token_ids_np)
+    padded_ids = np.zeros((1, MAX_SEQ_LEN), dtype="int32")
+    padded_ids[0, :seq_len] = token_ids_np
+    padding_mask = np.zeros((1, MAX_SEQ_LEN), dtype="int32")
+    padding_mask[0, :seq_len] = 1
+    print(f'   Sample text: "{TEXT_PROMPT}"')
+    print(f"   Token IDs:   {token_ids_np.tolist()}")
+
+    # --- Phase 2: Load HF model and precompute all outputs ---
+    print("\n-> Loading HF reference model...")
     hf_model = AutoModel.from_pretrained(hf_preset, trust_remote_code=True)
     hf_model.eval()
     hf_params = sum(p.numel() for p in hf_model.parameters())
     print(f"   HF model loaded: {hf_params:,} params")
 
+    # Build image converter using config from the loaded HF model.
+    img_size = hf_model.config.img_size
+    image_converter = TIPSv2ImageConverter(
+        image_size=(img_size, img_size),
+        scale=(1.0 / 255.0,),
+    )
+    print(f"   Image size: {img_size}x{img_size}")
+
+    # Download and preprocess a real sample image.
+    print("   Downloading sample image...")
+    response = requests.get(SAMPLE_IMAGE_URL)
+    pil_img = Image.open(BytesIO(response.content)).convert("RGB")
+    pil_img = pil_img.resize((img_size, img_size))
+    raw_img = np.array(pil_img, dtype="uint8")[np.newaxis]
+    img_np = ops.convert_to_numpy(image_converter(raw_img)).astype("float32")
+    print(
+        f"   Image shape: {img_np.shape}, range: "
+        f"[{img_np.min():.3f}, {img_np.max():.3f}]"
+    )
+
     print("\n-> Precomputing all HF outputs...")
-    hf_results = precompute_hf_outputs(hf_model)
+    hf_results = precompute_hf_outputs(
+        hf_model, img_np, padded_ids, padding_mask
+    )
     print("   HF outputs precomputed!")
 
-    # --- Phase 2: Free HF model to reclaim memory ---
+    # --- Phase 3: Free HF model to reclaim memory ---
     print("\n-> Releasing HF model to free memory...")
     del hf_model
     gc.collect()
@@ -192,7 +238,7 @@ def main(_):
         torch.cuda.empty_cache()
     print("   HF model released.")
 
-    # --- Phase 3: Load KerasHub model via from_preset ---
+    # --- Phase 4: Load KerasHub model via from_preset ---
     print("\n-> Loading KerasHub model from HF preset...")
     keras_model = keras_hub.models.TIPSv2Backbone.from_preset(
         f"hf://{hf_preset}", dtype="float32"
@@ -200,13 +246,13 @@ def main(_):
     keras_params = keras_model.count_params()
     print(f"   KerasHub model loaded: {keras_params:,} params")
 
-    # --- Phase 4: Validate against precomputed HF outputs ---
+    # --- Phase 5: Validate against precomputed HF outputs ---
     validate_output(keras_model, hf_results)
 
-    # --- Phase 5: Save preset ---
-    save_preset(keras_model, preset)
+    # --- Phase 6: Save preset ---
+    save_preset(keras_model, tokenizer, image_converter, preset)
 
-    # --- Phase 6: Upload if requested ---
+    # --- Phase 7: Upload if requested ---
     upload_uri = FLAGS.upload_uri
     if upload_uri:
         keras_hub.upload_preset(uri=upload_uri, preset=f"./{preset}")

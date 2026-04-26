@@ -1,6 +1,7 @@
 """Tests for TIPSv2 layers."""
 
 import numpy as np
+from keras import ops
 
 from keras_hub.src.models.tipsv2.tipsv2_layers import TIPSv2LayerScale
 from keras_hub.src.models.tipsv2.tipsv2_layers import TIPSv2MLP
@@ -30,7 +31,7 @@ class TIPSv2LayerScaleTest(TestCase):
     def test_scaling_effect(self):
         layer = TIPSv2LayerScale(dim=8, init_values=2.0)
         x = np.ones((1, 3, 8), dtype="float32")
-        out = np.array(layer(x))
+        out = ops.convert_to_numpy(layer(x))
         np.testing.assert_allclose(out, np.full((1, 3, 8), 2.0), atol=1e-6)
 
     def test_get_config(self):
@@ -83,7 +84,7 @@ class TIPSv2VisionAttentionTest(TestCase):
     def test_finite_outputs(self):
         layer = TIPSv2VisionAttention(dim=32, num_heads=4)
         x = np.random.rand(2, 5, 32).astype("float32")
-        out = np.array(layer(x))
+        out = ops.convert_to_numpy(layer(x))
         self.assertTrue(np.all(np.isfinite(out)))
 
     def test_get_config(self):
@@ -184,7 +185,7 @@ class TIPSv2VisionBlockTest(TestCase):
             dim=32, num_heads=4, mlp_ratio=2.0, init_values=1.0
         )
         x = np.random.rand(2, 5, 32).astype("float32")
-        out = np.array(block(x))
+        out = ops.convert_to_numpy(block(x))
         # Residual ensures output should not be zero.
         self.assertFalse(np.allclose(out, 0.0))
 
@@ -222,7 +223,7 @@ class TIPSv2TextAttentionTest(TestCase):
         x = np.random.rand(1, 4, 32).astype("float32")
         # All masked except position 0.
         mask = np.array([[1, 0, 0, 0]], dtype="float32")
-        out = np.array(layer(x, mask))
+        out = ops.convert_to_numpy(layer(x, mask))
         # The output should still be finite even with heavy masking.
         self.assertTrue(np.all(np.isfinite(out)))
 
@@ -248,7 +249,7 @@ class TIPSv2TextMLPTest(TestCase):
         layer = TIPSv2TextMLP(mlp_dim=64, d_model=32)
         x = np.random.rand(1, 4, 32).astype("float32")
         mask = np.array([[1, 1, 0, 0]], dtype="float32")
-        out = np.array(layer(x, mask))
+        out = ops.convert_to_numpy(layer(x, mask))
         # Positions 2 and 3 should be zero.
         np.testing.assert_allclose(out[0, 2], np.zeros(32), atol=1e-7)
         np.testing.assert_allclose(out[0, 3], np.zeros(32), atol=1e-7)
@@ -274,7 +275,7 @@ class TIPSv2TextBlockTest(TestCase):
         block = TIPSv2TextBlock(d_model=32, num_heads=4, mlp_dim=64)
         x = np.random.rand(2, 6, 32).astype("float32")
         mask = np.ones((2, 6), dtype="float32")
-        out = np.array(block(x, mask))
+        out = ops.convert_to_numpy(block(x, mask))
         # Residual connection means output shouldn't be zero.
         self.assertFalse(np.allclose(out, 0.0))
 
@@ -284,7 +285,7 @@ class TIPSv2TextBlockTest(TestCase):
         mask = np.array(
             [[1, 1, 1, 1, 0, 0], [1, 1, 1, 0, 0, 0]], dtype="float32"
         )
-        out = np.array(block(x, mask))
+        out = ops.convert_to_numpy(block(x, mask))
         self.assertTrue(np.all(np.isfinite(out)))
 
     def test_get_config(self):

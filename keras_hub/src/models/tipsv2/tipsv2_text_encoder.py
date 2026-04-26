@@ -89,8 +89,10 @@ class TIPSv2SinusoidalPositionEmbedding(keras.layers.Layer):
         """
         seq_length = ops.shape(inputs)[-2]
         # Slice the pre-computed table to match seq_length.
+        # Explicitly convert Variable to tensor for JAX tracing.
+        pos_table = ops.convert_to_tensor(self.pos_table)
         pos_embed = ops.slice(
-            self.pos_table, (0, 0), (seq_length, self.embedding_dim)
+            pos_table, (0, 0), (seq_length, self.embedding_dim)
         )
         return ops.broadcast_to(pos_embed, ops.shape(inputs))
 

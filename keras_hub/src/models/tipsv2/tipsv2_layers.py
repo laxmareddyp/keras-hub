@@ -185,8 +185,8 @@ class TIPSv2VisionAttention(keras.layers.Layer):
         qkv = ops.transpose(qkv, (2, 0, 3, 1, 4))  # (3, B, H, N, Dh)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        q = q * ops.cast(self.scale, dtype=q.dtype)
         attn = ops.matmul(q, ops.transpose(k, (0, 1, 3, 2)))  # (B,H,N,N)
+        attn = attn * self.scale
         attn = ops.softmax(attn, axis=-1)
         attn = self.attn_drop(attn, training=training)
 
@@ -648,8 +648,8 @@ class TIPSv2TextAttention(keras.layers.Layer):
         qkv = ops.transpose(qkv, (2, 0, 3, 1, 4))  # (3, B, H, S, Dh)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        q = q * ops.cast(self.scale, dtype=q.dtype)
         attn = ops.matmul(q, ops.transpose(k, (0, 1, 3, 2)))  # (B,H,S,S)
+        attn = attn * self.scale
 
         # Build additive attention mask from padding mask.
         # mask: (B, seq) → attn_mask: (B, 1, 1, seq)

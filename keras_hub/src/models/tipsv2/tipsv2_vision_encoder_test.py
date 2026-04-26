@@ -67,7 +67,7 @@ class TIPSv2VisionEncoderTest(TestCase):
         # All outputs should be finite.
         for key in ["cls_token", "register_tokens", "patch_tokens"]:
             self.assertTrue(
-                np.all(np.isfinite(np.array(outputs[key]))),
+                np.all(np.isfinite(ops.convert_to_numpy(outputs[key]))),
                 f"{key} has non-finite values",
             )
 

@@ -1,6 +1,7 @@
 """Tests for TIPSv2 backbone."""
 
 import numpy as np
+from keras import ops
 
 from keras_hub.src.models.tipsv2.tipsv2_backbone import TIPSv2Backbone
 from keras_hub.src.models.tipsv2.tipsv2_text_encoder import TIPSv2TextEncoder
@@ -85,8 +86,16 @@ class TIPSv2BackboneTest(TestCase):
         self.assertEqual(outputs["text_embedding"].shape, (2, self.hidden_dim))
 
         # Outputs should be finite.
-        self.assertTrue(np.all(np.isfinite(outputs["vision_cls_embedding"])))
-        self.assertTrue(np.all(np.isfinite(outputs["text_embedding"])))
+        self.assertTrue(
+            np.all(
+                np.isfinite(
+                    ops.convert_to_numpy(outputs["vision_cls_embedding"])
+                )
+            )
+        )
+        self.assertTrue(
+            np.all(np.isfinite(ops.convert_to_numpy(outputs["text_embedding"])))
+        )
 
     def test_swiglu_variant(self):
         """Test with SwiGLU FFN (used by g/14 variant)."""

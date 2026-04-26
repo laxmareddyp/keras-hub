@@ -35,7 +35,7 @@ class TIPSv2TextEncoderTest(TestCase):
 
     def test_output_values(self):
         encoder = TIPSv2TextEncoder(**self.init_kwargs)
-        outputs = np.array(encoder(self.input_data))
+        outputs = ops.convert_to_numpy(encoder(self.input_data))
         # Output shape: (batch, hidden_dim).
         self.assertEqual(outputs.shape, (2, self.hidden_dim))
         # All values should be finite.
@@ -54,8 +54,8 @@ class TIPSv2TextEncoderTest(TestCase):
             "token_ids": np.array([[1, 2, 0, 0, 0, 0]], dtype="int32"),
             "padding_mask": np.array([[1, 1, 0, 0, 0, 0]], dtype="int32"),
         }
-        out1 = np.array(encoder(input1))
-        out2 = np.array(encoder(input2))
+        out1 = ops.convert_to_numpy(encoder(input1))
+        out2 = ops.convert_to_numpy(encoder(input2))
         # Different padding lengths should produce different embeddings.
         self.assertFalse(np.allclose(out1, out2, atol=1e-5))
 
@@ -66,14 +66,14 @@ class TIPSv2TextEncoderTest(TestCase):
             "token_ids": np.array([[1, 0, 0, 0, 0, 0]], dtype="int32"),
             "padding_mask": np.array([[1, 0, 0, 0, 0, 0]], dtype="int32"),
         }
-        out = np.array(encoder(inputs))
+        out = ops.convert_to_numpy(encoder(inputs))
         self.assertTrue(np.all(np.isfinite(out)))
 
     def test_no_scaling(self):
         """Test with scale_sqrt_depth=False."""
         init_kwargs = {**self.init_kwargs, "scale_sqrt_depth": False}
         encoder = TIPSv2TextEncoder(**init_kwargs)
-        out = np.array(encoder(self.input_data))
+        out = ops.convert_to_numpy(encoder(self.input_data))
         self.assertEqual(out.shape, (2, self.hidden_dim))
         self.assertTrue(np.all(np.isfinite(out)))
 
@@ -92,7 +92,7 @@ class TIPSv2TextEncoderTest(TestCase):
 
         # Roundtrip.
         restored = TIPSv2TextEncoder.from_config(config)
-        out = np.array(restored(self.input_data))
+        out = ops.convert_to_numpy(restored(self.input_data))
         self.assertEqual(out.shape, (2, self.hidden_dim))
 
     @pytest.mark.large
