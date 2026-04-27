@@ -11,6 +11,7 @@ import os
 
 import keras.ops as ops
 import numpy as np
+import torch
 from transformers import AutoModelForCausalLM
 
 from keras_hub.src.models.qwen3_5.qwen3_5_backbone import Qwen3_5Backbone
@@ -173,7 +174,6 @@ class TestQwen3_5Export(TestCase):
         )
 
         # 8. Compare Logits (round-trip numerical parity)
-        import torch
 
         input_ids = np.array([[3, 4]])  # "The quick"
 

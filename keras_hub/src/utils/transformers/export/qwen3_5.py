@@ -10,7 +10,14 @@ import keras.ops as ops
 
 
 def get_qwen3_5_config(backbone):
-    """Convert KerasHub Qwen3.5 backbone config to HF config dictionary."""
+    """Convert KerasHub Qwen3.5 backbone config to HF config dictionary.
+
+    Args:
+        backbone: A `Qwen3_5Backbone` instance.
+
+    Returns:
+        A dictionary containing the HuggingFace-compatible configuration.
+    """
 
     # Build rope_parameters to match HF's nested structure.
     rope_parameters = {
@@ -96,6 +103,14 @@ def get_qwen3_5_weights_map(backbone, include_lm_head=False):
     This is the inverse of the import converter in convert_qwen3_5.py.
     Each HF weight key maps to the corresponding Keras tensor, with
     appropriate transposes to reverse the import hook_fns.
+
+    Args:
+        backbone: A `Qwen3_5Backbone` instance.
+        include_lm_head: bool. If `True`, include the language model head
+            weights in the output map.
+
+    Returns:
+        A dictionary mapping HuggingFace weight keys to numpy arrays.
     """
     weights_map = {}
 
@@ -322,12 +337,19 @@ def get_qwen3_5_weights_map(backbone, include_lm_head=False):
 
 
 def get_qwen3_5_tokenizer_config(tokenizer):
-    """Convert KerasHub Qwen3.5 tokenizer config to HF format."""
+    """Convert KerasHub Qwen3.5 tokenizer config to HF format.
+
+    Args:
+        tokenizer: A `Qwen3_5Tokenizer` instance.
+
+    Returns:
+        A dictionary containing the HuggingFace tokenizer configuration.
+    """
     return {
         "tokenizer_class": "Qwen2Tokenizer",
         "bos_token": None,
         "eos_token": "<|im_end|>",
         "pad_token": "<|endoftext|>",
         "unk_token": None,
-        "model_max_length": 131072,
+        "model_max_length": 262144,
     }
