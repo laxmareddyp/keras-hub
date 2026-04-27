@@ -467,13 +467,10 @@ class T5Gemma2Backbone(Backbone):
             self.num_vision_tokens_per_image = (
                 self.vision_encoder.num_vision_tokens_per_image
             )
-            # EOI variables are created before super().__init__() (which builds
-            # the Functional graph). Functional Models only auto-track layers
-            # found during graph construction, so standalone keras.Variable
-            # objects must be tracked manually to ensure they are included in
-            # save_weights / load_weights.
-            self._track_variable(self.encoder_eoi_embedding)
-            self._track_variable(self.decoder_eoi_embedding)
+            # Re-assign EOI variables after super().__init__() to trigger
+            # automatic tracking by the Functional model for serialization.
+            self.encoder_eoi_embedding = self.encoder_eoi_embedding
+            self.decoder_eoi_embedding = self.decoder_eoi_embedding
 
     def get_config(self):
         config = super().get_config()
