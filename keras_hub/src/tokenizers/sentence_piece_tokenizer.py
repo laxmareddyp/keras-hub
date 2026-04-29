@@ -200,7 +200,7 @@ class SentencePieceTokenizer(tokenizer.Tokenizer):
             sp.IdToPiece(list(range(self._vocabulary_size)))
         )
         self._token_to_id_map = {
-            token: i for i, token in enumerate(self._vocabulary)
+            token: id for id, token in enumerate(self._vocabulary)
         }
         self._unk_token_id = sp.unk_id()
         self._update_special_token_ids()
