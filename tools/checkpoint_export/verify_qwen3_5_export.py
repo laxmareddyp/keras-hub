@@ -35,9 +35,12 @@ import numpy as np
 import requests
 import torch
 from PIL import Image
-from transformers import AutoModelForCausalLM
+from transformers import AutoConfig
 from transformers import AutoProcessor
 from transformers import AutoTokenizer
+from transformers.models.qwen3_5.modeling_qwen3_5 import (
+    Qwen3_5ForConditionalGeneration,
+)
 
 from keras_hub.src.models.qwen3_5.qwen3_5_causal_lm import Qwen3_5CausalLM
 
@@ -45,7 +48,7 @@ print(f"Keras backend: {keras.config.backend()}")
 print(f"Keras version: {keras.__version__}")
 
 # ---------------------------------------------------------------
-# Constants (same as conversion script)
+# Constants
 # ---------------------------------------------------------------
 PRESET_TO_HF = {
     "qwen3_5_0.8b_base": "Qwen/Qwen3.5-0.8B-Base",
@@ -175,7 +178,7 @@ def precompute_original_outputs(hf_model_id, has_vision, skip_generation):
     """Load original HF model and precompute all outputs."""
     print(f"\n[3/7] Loading ORIGINAL HF model: {hf_model_id}...")
 
-    hf_model = AutoModelForCausalLM.from_pretrained(
+    hf_model = Qwen3_5ForConditionalGeneration.from_pretrained(
         hf_model_id, torch_dtype=torch.float32
     )
     hf_model.eval()
@@ -219,6 +222,10 @@ def precompute_original_outputs(hf_model_id, has_vision, skip_generation):
             mm_out = hf_model(**mm_inputs)
         results["mm_logits"] = mm_out.logits.float().cpu().numpy()
         results["mm_input_ids"] = mm_inputs["input_ids"].cpu().numpy()
+        # Save all multimodal inputs for exported model comparison.
+        results["mm_inputs"] = {
+            k: v.cpu().numpy() for k, v in mm_inputs.items()
+        }
         print(f"    Image logits shape: {results['mm_logits'].shape}")
 
         if not skip_generation:
@@ -238,55 +245,21 @@ def precompute_original_outputs(hf_model_id, has_vision, skip_generation):
         print("\n  Computing video-to-text outputs...")
         video_frames = _load_test_video()
 
-        try:
-            from qwen_vl_utils import process_vision_info
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "video",
-                            "video": video_frames,
-                            "fps": VIDEO_FPS,
-                        },
-                        {"type": "text", "text": "Describe this video."},
-                    ],
-                }
-            ]
-            try:
-                text_input = processor.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-            except (ValueError, AttributeError):
-                # Base models don't have a chat template.
-                text_input = VIDEO_PROMPT
-            image_inputs, video_inputs, video_kwargs = process_vision_info(
-                messages, return_video_kwargs=True
-            )
-            for k, v in video_kwargs.items():
-                if isinstance(v, list) and len(v) == 1:
-                    video_kwargs[k] = v[0]
-            vid_inputs = processor(
-                text=[text_input],
-                images=image_inputs,
-                videos=video_inputs,
-                return_tensors="pt",
-                **video_kwargs,
-            ).to(device)
-        except ImportError:
-            print("    ⚠ qwen_vl_utils not installed, using direct call")
-            vid_inputs = processor(
-                text=[VIDEO_PROMPT],
-                videos=[video_frames],
-                return_tensors="pt",
-            ).to(device)
+        vid_inputs = processor(
+            text=[VIDEO_PROMPT],
+            videos=[video_frames],
+            return_tensors="pt",
+        ).to(device)
 
         try:
             with torch.no_grad():
                 vid_out = hf_model(**vid_inputs)
             results["vid_logits"] = vid_out.logits.float().cpu().numpy()
             results["vid_input_ids"] = vid_inputs["input_ids"].cpu().numpy()
+            # Save all video inputs for exported model comparison.
+            results["vid_inputs"] = {
+                k: v.cpu().numpy() for k, v in vid_inputs.items()
+            }
             print(f"    Video logits shape: {results['vid_logits'].shape}")
 
             if not skip_generation:
@@ -316,69 +289,102 @@ def precompute_original_outputs(hf_model_id, has_vision, skip_generation):
 # ---------------------------------------------------------------
 # 3. Load Exported HF model and compare
 # ---------------------------------------------------------------
-def validate_exported_model(
-    export_path, hf_model_id, original_results, has_vision, skip_generation
-):
-    """Load the exported model and compare against original."""
-
-    print(f"\n[4/7] Loading EXPORTED model from {export_path}...")
-    exp_model = AutoModelForCausalLM.from_pretrained(
-        export_path, torch_dtype=torch.float32
-    )
-    exp_model.eval()
-    exp_params = sum(p.numel() for p in exp_model.parameters())
-    orig_params = original_results["hf_params"]
-    print(f"  ✓ Exported: {exp_params:,} parameters")
-
-    param_match = orig_params == exp_params
-    print(
-        f"  {'✓' if param_match else '✗'} Param count: "
-        f"original={orig_params:,}, exported={exp_params:,}"
-    )
-
-    # Also load the tokenizer for generation.
-    exp_tokenizer = AutoTokenizer.from_pretrained(hf_model_id)
-
-    results = {"param_match": param_match, "config_pass": True}
-
-    # ------------------------------------------------------------------
-    # Step 5: Config comparison
-    # ------------------------------------------------------------------
-    print("\n[5/7] Comparing configs...")
-    orig_model_tmp = AutoModelForCausalLM.from_pretrained(
-        hf_model_id, torch_dtype=torch.float32
-    )
-    orig_cfg = orig_model_tmp.config
-    exp_cfg = exp_model.config
+# ---------------------------------------------------------------
+# 3a. Validate configs (compare ALL fields)
+# ---------------------------------------------------------------
+def validate_configs(exp_cfg, orig_cfg):
+    """Compare all config fields between exported and original models."""
+    print("\n  CONFIG VALIDATION")
 
     orig_text = getattr(orig_cfg, "text_config", orig_cfg)
     exp_text = getattr(exp_cfg, "text_config", exp_cfg)
 
-    fields = [
-        "vocab_size",
-        "num_hidden_layers",
-        "num_attention_heads",
-        "num_key_value_heads",
-        "hidden_size",
-        "intermediate_size",
-        "head_dim",
-        "tie_word_embeddings",
+    # Get all config fields from the original (the source of truth).
+    orig_dict = orig_text.to_dict() if hasattr(orig_text, "to_dict") else {}
+    exp_dict = exp_text.to_dict() if hasattr(exp_text, "to_dict") else {}
+
+    # Skip internal/meta fields that aren't part of the model config.
+    skip_keys = {
+        "_name_or_path",
+        "_attn_implementation",
+        "_attn_implementation_autoset",
+        "_commit_hash",
+        "transformers_version",
+        "torch_dtype",
+        "auto_map",
+        "architectures",
+        "dtype",
+    }
+
+    all_keys = sorted(set(orig_dict.keys()) | set(exp_dict.keys()))
+    config_pass = True
+    mismatches = []
+
+    for key in all_keys:
+        if key in skip_keys:
+            continue
+        o = orig_dict.get(key, "<missing>")
+        e = exp_dict.get(key, "<missing>")
+        if o == e:
+            print(f"    ✓ {key}: {o}")
+        else:
+            print(f"    ✗ {key}: original={o}, exported={e}")
+            mismatches.append(key)
+            config_pass = False
+
+    if mismatches:
+        print(f"\n    ⚠ {len(mismatches)} field(s) differ: {mismatches}")
+    else:
+        print(
+            f"\n    ✓ All {len(all_keys) - len(skip_keys)} config fields match"
+        )
+
+    return config_pass
+
+
+# ---------------------------------------------------------------
+# 3b. Validate token IDs
+# ---------------------------------------------------------------
+def validate_token_ids(exp_cfg, orig_cfg):
+    """Compare special token IDs between exported and original models."""
+    print("\n  TOKEN ID VALIDATION")
+
+    orig_text = getattr(orig_cfg, "text_config", orig_cfg)
+    exp_text = getattr(exp_cfg, "text_config", exp_cfg)
+
+    token_fields = [
+        "bos_token_id",
+        "eos_token_id",
+        "pad_token_id",
     ]
-    for name in fields:
+    # Also check model-specific token IDs.
+    for attr in dir(orig_text):
+        if attr.endswith("_token_id") and attr not in token_fields:
+            token_fields.append(attr)
+
+    token_pass = True
+    for name in sorted(set(token_fields)):
         o = getattr(orig_text, name, None)
         e = getattr(exp_text, name, None)
         match = o == e
-        print(f"  {'✓' if match else '✗'} {name}: original={o}, exported={e}")
+        print(f"    {'✓' if match else '✗'} {name}: original={o}, exported={e}")
         if not match:
-            results["config_pass"] = False
+            token_pass = False
 
-    del orig_model_tmp
-    gc.collect()
+    return token_pass
 
-    # ------------------------------------------------------------------
-    # Step 6: Text-only validation
-    # ------------------------------------------------------------------
-    print("\n[6/7] TEXT VALIDATION")
+
+# ---------------------------------------------------------------
+# 3c. Validate numerics (logits + generation)
+# ---------------------------------------------------------------
+def validate_numerics(
+    exp_model, exp_tokenizer, original_results, has_vision, skip_generation
+):
+    """Compare logits and generation between exported and original models."""
+    results = {}
+
+    # --- Text ---
+    print("\n  TEXT LOGIT VALIDATION")
     text_ids = torch.tensor(original_results["text_input_ids"]).to(device)
 
     with torch.no_grad():
@@ -388,17 +394,17 @@ def validate_exported_model(
 
     text_diff = np.abs(exp_text_logits - orig_text_logits)
     results["text_mean_diff"] = float(text_diff.mean())
-    print(f"  Logit mean abs diff: {results['text_mean_diff']:.2e}")
+    print(f"    Logit mean abs diff: {results['text_mean_diff']:.2e}")
     results["text_pass"] = results["text_mean_diff"] < 0.1
 
     # Top-5 overlap for first-token prediction.
     orig_top5 = set(np.argsort(orig_text_logits[0, -1])[-5:].tolist())
     exp_top5 = set(np.argsort(exp_text_logits[0, -1])[-5:].tolist())
     overlap = len(orig_top5 & exp_top5)
-    print(f"  Top-5 token overlap: {overlap}/5 ({100 * overlap / 5:.0f}%)")
+    print(f"    Top-5 token overlap: {overlap}/5 ({100 * overlap / 5:.0f}%)")
 
     if not skip_generation:
-        print("\n  Text generation comparison:")
+        print("\n  TEXT GENERATION VALIDATION")
         hf_inputs = exp_tokenizer(TEXT_PROMPT, return_tensors="pt").to(device)
         prompt_len = hf_inputs["input_ids"].shape[1]
 
@@ -420,57 +426,111 @@ def validate_exported_model(
         else:
             print("    ⚠ Text differs (expected with bf16→f32 precision)")
 
-    # ------------------------------------------------------------------
-    # Step 7: Multimodal validation (image + video)
-    # ------------------------------------------------------------------
-    if has_vision:
-        print("\n[7/7] MULTIMODAL VALIDATION")
+    # --- Image-to-text ---
+    if has_vision and "mm_logits" in original_results:
+        print("\n  IMAGE LOGIT VALIDATION")
+        # Pass full multimodal inputs (input_ids + pixel_values + grids).
+        mm_kwargs = {
+            k: torch.tensor(v).to(device)
+            for k, v in original_results["mm_inputs"].items()
+        }
 
-        # --- Image-to-text ---
-        if "mm_logits" in original_results:
-            print("\n  Image-to-text:")
-            mm_ids = torch.tensor(original_results["mm_input_ids"]).to(device)
+        with torch.no_grad():
+            exp_mm_out = exp_model(**mm_kwargs)
+        exp_mm_logits = exp_mm_out.logits.float().cpu().numpy()
+        orig_mm_logits = original_results["mm_logits"]
 
-            with torch.no_grad():
-                exp_mm_out = exp_model(input_ids=mm_ids)
-            exp_mm_logits = exp_mm_out.logits.float().cpu().numpy()
-            orig_mm_logits = original_results["mm_logits"]
+        mm_diff = np.abs(exp_mm_logits - orig_mm_logits)
+        results["mm_mean_diff"] = float(mm_diff.mean())
+        print(f"    Logit mean abs diff: {results['mm_mean_diff']:.2e}")
 
-            mm_diff = np.abs(exp_mm_logits - orig_mm_logits)
-            results["mm_mean_diff"] = float(mm_diff.mean())
-            print(f"    Logit mean abs diff: {results['mm_mean_diff']:.2e}")
+        if not skip_generation:
+            orig_mm_gen = original_results.get("mm_generated", "N/A")
+            print(f'    Original: "{_extract_response(orig_mm_gen)[:80]}"')
 
-            if not skip_generation:
-                orig_mm_gen = original_results.get("mm_generated", "N/A")
-                print(f'    Original: "{_extract_response(orig_mm_gen)[:80]}"')
+    # --- Video-to-text ---
+    if has_vision and original_results.get("vid_logits") is not None:
+        print("\n  VIDEO LOGIT VALIDATION")
+        # Pass full video inputs (input_ids + pixel_values + grids).
+        vid_kwargs = {
+            k: torch.tensor(v).to(device)
+            for k, v in original_results["vid_inputs"].items()
+        }
 
-        # --- Video-to-text ---
-        if original_results.get("vid_logits") is not None:
-            print("\n  Video-to-text:")
-            vid_ids = torch.tensor(original_results["vid_input_ids"]).to(device)
+        with torch.no_grad():
+            exp_vid_out = exp_model(**vid_kwargs)
+        exp_vid_logits = exp_vid_out.logits.float().cpu().numpy()
+        orig_vid_logits = original_results["vid_logits"]
 
-            with torch.no_grad():
-                exp_vid_out = exp_model(input_ids=vid_ids)
-            exp_vid_logits = exp_vid_out.logits.float().cpu().numpy()
-            orig_vid_logits = original_results["vid_logits"]
+        vid_diff = np.abs(exp_vid_logits - orig_vid_logits)
+        results["vid_mean_diff"] = float(vid_diff.mean())
+        print(f"    Logit mean abs diff: {results['vid_mean_diff']:.2e}")
 
-            vid_diff = np.abs(exp_vid_logits - orig_vid_logits)
-            results["vid_mean_diff"] = float(vid_diff.mean())
-            print(f"    Logit mean abs diff: {results['vid_mean_diff']:.2e}")
+        if not skip_generation:
+            orig_vid_gen = original_results.get("vid_generated", "N/A")
+            print(f'    Original: "{_extract_response(orig_vid_gen)[:80]}"')
+    elif has_vision:
+        print("\n  VIDEO LOGIT VALIDATION: ⚠ Skipped (original failed)")
 
-            if not skip_generation:
-                orig_vid_gen = original_results.get("vid_generated", "N/A")
-                print(f'    Original: "{_extract_response(orig_vid_gen)[:80]}"')
-        else:
-            print("\n  Video-to-text: ⚠ Skipped (original failed)")
-    else:
+    return results
+
+
+# ---------------------------------------------------------------
+# 3. Load Exported HF model and run all validations
+# ---------------------------------------------------------------
+def validate_exported_model(
+    export_path, hf_model_id, original_results, has_vision, skip_generation
+):
+    """Load the exported model and compare against original."""
+
+    print(f"\n[4/7] Loading EXPORTED model from {export_path}...")
+    exp_model = Qwen3_5ForConditionalGeneration.from_pretrained(
+        export_path, torch_dtype=torch.float32
+    )
+    exp_model.eval()
+    exp_params = sum(p.numel() for p in exp_model.parameters())
+    orig_params = original_results["hf_params"]
+    print(f"  ✓ Exported: {exp_params:,} parameters")
+
+    param_match = orig_params == exp_params
+    print(
+        f"  {'✓' if param_match else '✗'} Param count: "
+        f"original={orig_params:,}, exported={exp_params:,}"
+    )
+
+    exp_tokenizer = AutoTokenizer.from_pretrained(hf_model_id)
+
+    # Load original config for comparison.
+    print("\n[5/7] Validating configs and token IDs...")
+    orig_cfg = AutoConfig.from_pretrained(hf_model_id)
+    exp_cfg = exp_model.config
+
+    config_pass = validate_configs(exp_cfg, orig_cfg)
+    token_pass = validate_token_ids(exp_cfg, orig_cfg)
+
+    # Numerics validation.
+    print("\n[6/7] Validating numerics...")
+    numeric_results = validate_numerics(
+        exp_model,
+        exp_tokenizer,
+        original_results,
+        has_vision,
+        skip_generation,
+    )
+
+    if not has_vision:
         print("\n[7/7] No vision encoder — skipping multimodal validation.")
 
     # Clean up.
     del exp_model
     gc.collect()
 
-    return results
+    return {
+        "param_match": param_match,
+        "config_pass": config_pass,
+        "token_pass": token_pass,
+        **numeric_results,
+    }
 
 
 # ---------------------------------------------------------------
@@ -479,14 +539,16 @@ def validate_exported_model(
 def print_summary(results):
     """Print final summary."""
     config_pass = results.get("config_pass", False)
+    token_pass = results.get("token_pass", False)
     text_pass = results.get("text_pass", False)
     param_match = results.get("param_match", False)
 
-    all_pass = config_pass and text_pass
+    all_pass = config_pass and token_pass and text_pass
     print("\n" + "=" * 70)
     if all_pass:
         print("  ✅ ALL CHECKS PASSED")
         print("     - Config fields match ✓")
+        print("     - Token IDs match ✓")
         print(
             f"     - Parameter count: "
             f"{'match ✓' if param_match else 'differ (see note)'}"

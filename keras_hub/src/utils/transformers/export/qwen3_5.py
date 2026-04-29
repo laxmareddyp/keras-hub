@@ -1,11 +1,3 @@
-"""Export utilities for Qwen3.5 models to HuggingFace Transformers format.
-
-Provides three functions following the KerasHub export pattern:
-  - get_qwen3_5_config: Backbone config → HF config dict
-  - get_qwen3_5_weights_map: Backbone weights → HF weight name mapping
-  - get_qwen3_5_tokenizer_config: Tokenizer → HF tokenizer config dict
-"""
-
 import keras.ops as ops
 
 
@@ -54,11 +46,17 @@ def get_qwen3_5_config(backbone):
         "linear_value_head_dim": backbone.linear_value_head_dim,
         "linear_conv_kernel_dim": backbone.linear_conv_kernel_dim,
         "mamba_ssm_dtype": "float32",
+        "eos_token_id": 248044,
+        "full_attention_interval": 4,
+        "mlp_only_layers": [],
+        "mtp_num_hidden_layers": 1,
+        "mtp_use_dedicated_embeddings": False,
     }
 
     # Add max_position_embeddings if available.
-    if hasattr(backbone, "max_sequence_length"):
-        text_config["max_position_embeddings"] = backbone.max_sequence_length
+    text_config["max_position_embeddings"] = getattr(
+        backbone, "max_sequence_length", 262144
+    )
 
     hf_config = {
         "architectures": ["Qwen3_5ForConditionalGeneration"],
@@ -256,25 +254,6 @@ def get_qwen3_5_weights_map(backbone, include_lm_head=False):
     ):
         vis = backbone.vision_encoder
         vis_prefix = "model.visual"
-
-        # Ensure all vision sublayers are built (they use lazy build).
-        if not vis.patch_embed.built:
-            vis.patch_embed.build(
-                (
-                    None,
-                    vis.temporal_patch_size,
-                    vis.patch_size,
-                    vis.patch_size,
-                    vis.in_channels,
-                )
-            )
-        if not vis.pos_embed.built:
-            vis.pos_embed.build((None,))
-        for blk in vis.blocks:
-            if not blk.built:
-                blk.build((None, vis.hidden_size))
-        if not vis.merger.built:
-            vis.merger.build((None, vis.hidden_size))
 
         # Patch embedding Conv3D:
         # Keras: (temporal, patch, patch, in_channels, hidden_size)

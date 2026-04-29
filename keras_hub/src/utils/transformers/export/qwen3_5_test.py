@@ -105,11 +105,11 @@ class TestQwen3_5Export(TestCase):
         export_path = os.path.join(temp_dir, "export_task")
         export_to_safetensors(keras_model, export_path)
 
-        # Patch config for our tiny vocab
+        # Override eos_token_id for our tiny vocab.
         config_path = os.path.join(export_path, "config.json")
         with open(config_path, "r") as f:
             cfg = json.load(f)
-        cfg["eos_token_id"] = 2  # <|im_end|>
+        cfg["text_config"]["eos_token_id"] = 2
         with open(config_path, "w") as f:
             json.dump(cfg, f, indent=2)
 
