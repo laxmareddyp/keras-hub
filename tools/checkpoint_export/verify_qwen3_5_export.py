@@ -383,7 +383,9 @@ def validate_numerics(
     """Compare logits and generation between exported and original models."""
     results = {}
 
-    # --- Text ---
+    # ---- Logit comparisons (all modalities) ----
+
+    # Text logits.
     print("\n  TEXT LOGIT VALIDATION")
     text_ids = torch.tensor(original_results["text_input_ids"]).to(device)
 
@@ -397,39 +399,14 @@ def validate_numerics(
     print(f"    Logit mean abs diff: {results['text_mean_diff']:.2e}")
     results["text_pass"] = results["text_mean_diff"] < 0.1
 
-    # Top-5 overlap for first-token prediction.
     orig_top5 = set(np.argsort(orig_text_logits[0, -1])[-5:].tolist())
     exp_top5 = set(np.argsort(exp_text_logits[0, -1])[-5:].tolist())
     overlap = len(orig_top5 & exp_top5)
     print(f"    Top-5 token overlap: {overlap}/5 ({100 * overlap / 5:.0f}%)")
 
-    if not skip_generation:
-        print("\n  TEXT GENERATION VALIDATION")
-        hf_inputs = exp_tokenizer(TEXT_PROMPT, return_tensors="pt").to(device)
-        prompt_len = hf_inputs["input_ids"].shape[1]
-
-        with torch.no_grad():
-            exp_gen = exp_model.generate(
-                **hf_inputs, max_new_tokens=30, do_sample=False
-            )
-        exp_gen_text = exp_tokenizer.decode(
-            exp_gen[0][prompt_len:], skip_special_tokens=True
-        )
-        orig_gen_text = original_results.get("text_generated", "N/A")
-
-        print(f'    Prompt:   "{TEXT_PROMPT}"')
-        print(f'    Original: "{orig_gen_text[:80]}"')
-        print(f'    Exported: "{exp_gen_text[:80]}"')
-
-        if orig_gen_text == exp_gen_text:
-            print("    ✓ Text generation is IDENTICAL")
-        else:
-            print("    ⚠ Text differs (expected with bf16→f32 precision)")
-
-    # --- Image-to-text ---
+    # Image logits.
     if has_vision and "mm_logits" in original_results:
         print("\n  IMAGE LOGIT VALIDATION")
-        # Pass full multimodal inputs (input_ids + pixel_values + grids).
         mm_kwargs = {
             k: torch.tensor(v).to(device)
             for k, v in original_results["mm_inputs"].items()
@@ -444,14 +421,9 @@ def validate_numerics(
         results["mm_mean_diff"] = float(mm_diff.mean())
         print(f"    Logit mean abs diff: {results['mm_mean_diff']:.2e}")
 
-        if not skip_generation:
-            orig_mm_gen = original_results.get("mm_generated", "N/A")
-            print(f'    Original: "{_extract_response(orig_mm_gen)[:80]}"')
-
-    # --- Video-to-text ---
+    # Video logits.
     if has_vision and original_results.get("vid_logits") is not None:
         print("\n  VIDEO LOGIT VALIDATION")
-        # Pass full video inputs (input_ids + pixel_values + grids).
         vid_kwargs = {
             k: torch.tensor(v).to(device)
             for k, v in original_results["vid_inputs"].items()
@@ -465,12 +437,49 @@ def validate_numerics(
         vid_diff = np.abs(exp_vid_logits - orig_vid_logits)
         results["vid_mean_diff"] = float(vid_diff.mean())
         print(f"    Logit mean abs diff: {results['vid_mean_diff']:.2e}")
-
-        if not skip_generation:
-            orig_vid_gen = original_results.get("vid_generated", "N/A")
-            print(f'    Original: "{_extract_response(orig_vid_gen)[:80]}"')
     elif has_vision:
         print("\n  VIDEO LOGIT VALIDATION: ⚠ Skipped (original failed)")
+
+    # ---- Generation comparison ----
+    if not skip_generation:
+        print("\n  GENERATION COMPARISON")
+
+        # Text generation.
+        hf_inputs = exp_tokenizer(TEXT_PROMPT, return_tensors="pt").to(device)
+        prompt_len = hf_inputs["input_ids"].shape[1]
+
+        with torch.no_grad():
+            exp_gen = exp_model.generate(
+                **hf_inputs, max_new_tokens=30, do_sample=False
+            )
+        exp_gen_text = exp_tokenizer.decode(
+            exp_gen[0][prompt_len:], skip_special_tokens=True
+        )
+        orig_gen_text = original_results.get("text_generated", "N/A")
+
+        print(f'    Text prompt:  "{TEXT_PROMPT}"')
+        print(f'    Original:     "{orig_gen_text[:80]}"')
+        print(f'    Exported:     "{exp_gen_text[:80]}"')
+        if orig_gen_text == exp_gen_text:
+            results["text_gen_match"] = True
+            print("    ✓ Text generation is IDENTICAL")
+        else:
+            results["text_gen_match"] = False
+            print("    ⚠ Text differs (expected with bf16→f32 precision)")
+
+        # Image generation.
+        if has_vision and "mm_generated" in original_results:
+            orig_mm_gen = original_results["mm_generated"]
+            print(
+                f'\n    Image output:  "{_extract_response(orig_mm_gen)[:80]}"'
+            )
+
+        # Video generation.
+        if has_vision and "vid_generated" in original_results:
+            orig_vid_gen = original_results["vid_generated"]
+            print(
+                f'    Video output:  "{_extract_response(orig_vid_gen)[:80]}"'
+            )
 
     return results
 
@@ -542,33 +551,37 @@ def print_summary(results):
     token_pass = results.get("token_pass", False)
     text_pass = results.get("text_pass", False)
     param_match = results.get("param_match", False)
+    text_gen_match = results.get("text_gen_match", None)
 
     all_pass = config_pass and token_pass and text_pass
     print("\n" + "=" * 70)
     if all_pass:
         print("  ✅ ALL CHECKS PASSED")
-        print("     - Config fields match ✓")
-        print("     - Token IDs match ✓")
-        print(
-            f"     - Parameter count: "
-            f"{'match ✓' if param_match else 'differ (see note)'}"
-        )
-        print(
-            f"     - Text logit parity ✓ "
-            f"(mean diff: {results.get('text_mean_diff', 'N/A'):.2e})"
-        )
-        if "mm_mean_diff" in results:
-            print(
-                f"     - Image logit parity ✓ "
-                f"(mean diff: {results['mm_mean_diff']:.2e})"
-            )
-        if "vid_mean_diff" in results:
-            print(
-                f"     - Video logit parity ✓ "
-                f"(mean diff: {results['vid_mean_diff']:.2e})"
-            )
     else:
         print("  ❌ SOME CHECKS FAILED — Review output above")
+
+    print(f"     - Config fields match {'✓' if config_pass else '✗'}")
+    print(f"     - Token IDs match {'✓' if token_pass else '✗'}")
+    print(f"     - Parameter count: {'match ✓' if param_match else 'differ ✗'}")
+    print(
+        f"     - Text logit parity "
+        f"{'✓' if text_pass else '✗'} "
+        f"(mean diff: {results.get('text_mean_diff', 'N/A'):.2e})"
+    )
+    if "mm_mean_diff" in results:
+        print(
+            f"     - Image logit parity ✓ "
+            f"(mean diff: {results['mm_mean_diff']:.2e})"
+        )
+    if "vid_mean_diff" in results:
+        print(
+            f"     - Video logit parity ✓ "
+            f"(mean diff: {results['vid_mean_diff']:.2e})"
+        )
+    if text_gen_match is True:
+        print("     - Text generation: IDENTICAL ✓")
+    elif text_gen_match is False:
+        print("     - Text generation: differs (bf16→f32 precision)")
     print("=" * 70 + "\n")
 
     return all_pass
