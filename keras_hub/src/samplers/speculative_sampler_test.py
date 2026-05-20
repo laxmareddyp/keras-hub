@@ -197,3 +197,73 @@ class SpeculativeSamplerTest(TestCase):
         output_str = self.join_as_string(output)
         self.assertTrue(output_str[0].startswith("ab"))
         self.assertEqual(output_str[0][2], "c")
+
+    def test_generic_speculative_decoding_with_causal_lm(self):
+        from keras_hub.src.models.gpt2.gpt2_causal_lm_preprocessor import (
+            GPT2CausalLMPreprocessor,
+        )
+        from keras_hub.src.models.gpt2.gpt2_tokenizer import GPT2Tokenizer
+        from keras_hub.src.models.gpt2.gpt2_backbone import GPT2Backbone
+        from keras_hub.src.models.gpt2.gpt2_causal_lm import GPT2CausalLM
+
+        merges = ["Ġ a", "Ġ t", "Ġ i", "Ġ b", "a i", "p l", "n e"]
+        merges += ["Ġa t", "p o", "r t", "Ġt h", "ai r", "pl a", "po rt"]
+        merges += ["Ġai r", "Ġa i", "pla ne"]
+        vocab = []
+        for merge in merges:
+            a, b = merge.split(" ")
+            vocab.extend([a, b, a + b])
+        vocab += ["!", "<|endoftext|>"]
+        vocab = sorted(set(vocab))
+        vocab = dict([(token, i) for i, token in enumerate(vocab)])
+
+        preprocessor = GPT2CausalLMPreprocessor(
+            GPT2Tokenizer(vocabulary=vocab, merges=merges),
+            sequence_length=8,
+        )
+        vocabulary_size = preprocessor.tokenizer.vocabulary_size()
+
+        target_backbone = GPT2Backbone(
+            vocabulary_size=vocabulary_size,
+            num_layers=2,
+            num_heads=2,
+            hidden_dim=4,
+            intermediate_dim=8,
+            max_sequence_length=preprocessor.sequence_length,
+        )
+
+        assistant_backbone = GPT2Backbone(
+            vocabulary_size=vocabulary_size,
+            num_layers=1,
+            num_heads=1,
+            hidden_dim=4,
+            intermediate_dim=8,
+            max_sequence_length=preprocessor.sequence_length,
+        )
+
+        target_model = GPT2CausalLM(
+            preprocessor=preprocessor,
+            backbone=target_backbone,
+        )
+
+        assistant_model = GPT2CausalLM(
+            preprocessor=preprocessor,
+            backbone=assistant_backbone,
+        )
+
+        prompt = " airplane at airport"
+        # Set assistant model via property — no signature changes needed
+        # in any CausalLM subclass.
+        target_model.assistant_model = assistant_model
+        output_greedy = target_model.generate(prompt)
+        self.assertTrue(len(output_greedy) > 0)
+
+        target_model.compile(sampler="top_k")
+        output_stochastic = target_model.generate(prompt)
+        self.assertTrue(len(output_stochastic) > 0)
+
+        # Verify plain generation still works after clearing assistant.
+        target_model.assistant_model = None
+        target_model.compile(sampler="greedy")
+        output_plain = target_model.generate(prompt)
+        self.assertTrue(len(output_plain) > 0)

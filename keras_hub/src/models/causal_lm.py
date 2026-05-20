@@ -1,3 +1,4 @@
+import inspect
 import itertools
 from functools import partial
 
@@ -7,7 +8,9 @@ from keras import tree
 
 from keras_hub.src.api_export import keras_hub_export
 from keras_hub.src.models.task import Task
+from keras_hub.src.samplers.greedy_sampler import GreedySampler
 from keras_hub.src.samplers.serialization import get as get_sampler
+from keras_hub.src.samplers.speculative_sampler import SpeculativeSampler
 
 try:
     import tensorflow as tf
@@ -303,6 +306,12 @@ class CausalLM(Task):
         expected by the `backbone`. See the example usage above for a
         demonstration of each.
 
+        Attributes:
+            assistant_model: Optional. A smaller `CausalLM` to use as
+                a draft model for speculative decoding. When set,
+                `generate()` uses the assistant to draft tokens verified
+                by this model. Default is `None` (standard generation).
+
         Args:
             inputs: python data, tensor data, or a `tf.data.Dataset`. If a
                 `preprocessor` is attached to the model, `inputs` should match
@@ -327,82 +336,147 @@ class CausalLM(Task):
                 this option is set to True, only the newly generated text is
                 returned.
         """
-        # Setup our three main passes.
-        # 1. Optionally preprocessing strings to dense integer tensors.
-        # 2. Generate new tokens via a compiled function on dense tensors.
-        # 3. Optionally postprocess dense integer tensors back to string.
-        generate_function = self.make_generate_function()
+        assistant_model = getattr(self, "assistant_model", None)
 
-        if self.preprocessor is None and stop_token_ids == "auto":
-            raise ValueError(
-                "A `preprocessor` must be attached to the model if "
-                '`stop_token_ids="auto"`. Currently `preprocessor=None`. To '
-                "call `generate()` with preprocessing detached, either pass "
-                "`stop_token_ids=None` to always generate until `max_length` "
-                "or pass a tuple of token ids that should terminate generation "
-                "as `stop_token_ids`."
-            )
-        elif stop_token_ids == "auto":
-            stop_token_ids = [self.preprocessor.tokenizer.end_token_id]
-            # Some models like Llama3 use two end tokens: <|eot_id|> in
-            # "instruct" versions and <|end_of_text|> in others.
-            if hasattr(self.preprocessor.tokenizer, "end_token2_id"):
-                stop_token_ids.append(self.preprocessor.tokenizer.end_token2_id)
+        if assistant_model is not None:
+            # Ensure both models use the standard 3-arg call_with_cache.
+            for m, name in [(self, "target"), (assistant_model, "assistant")]:
+                sig = inspect.signature(m.call_with_cache)
+                required = [
+                    p
+                    for p, v in sig.parameters.items()
+                    if p != "self"
+                    and v.default is inspect.Parameter.empty
+                ]
+                if len(required) > 3:
+                    raise ValueError(
+                        f"Generic speculative decoding requires models "
+                        f"with the standard 3-argument "
+                        f"call_with_cache(token_ids, cache, "
+                        f"cache_update_index), but the {name} model "
+                        f"({type(m).__name__}) has {len(required)} "
+                        f"required parameters: {required}. Use the "
+                        f"model's native speculative decoding support "
+                        f"instead."
+                    )
 
-        def preprocess(x):
-            return self.preprocessor.generate_preprocess(
-                x, sequence_length=max_length
-            )
+            # Save current sampler and compiled graph for restoration.
+            original_sampler = self.sampler
+            original_generate_function = self.generate_function
 
-        def generate(x):
-            return generate_function(x, stop_token_ids=stop_token_ids)
+            num_spec = getattr(assistant_model, "num_speculative_tokens", 5)
 
-        def strip_prompt_function(x, prompt):
-            # This function removes the prompt from the generated
-            # response, in a batch-friendly fashion.
-            y = {}
-            prompt_mask = prompt["padding_mask"]
-            seq_len = prompt_mask.shape[1]
+            # Use assistant's sampler for stochastic rejection sampling.
+            spec_base_sampler = getattr(assistant_model, "sampler", None)
+            if isinstance(self.sampler, GreedySampler):
+                spec_base_sampler = None
 
-            # We need to shift every output sequence by the size of the prompt.
-            shifts = -ops.sum(ops.cast(prompt_mask, "int"), axis=1) % seq_len
-            ix = ops.arange(seq_len, dtype="int")
-            ix = ops.expand_dims(ix, axis=0) - ops.expand_dims(shifts, axis=1)
+            # Reuse cached speculative graph if config matches.
+            cached_spec_sampler = getattr(self, "_cached_spec_sampler", None)
+            cached_spec_fn = getattr(self, "_cached_spec_generate_fn", None)
 
-            # This produces the desired shift (in fact a rollover).
-            def roll_sequence(seq):
-                return ops.take_along_axis(seq, ix, axis=1)
+            if (
+                cached_spec_sampler is not None
+                and cached_spec_sampler.num_speculative_tokens == num_spec
+                and cached_spec_sampler.base_sampler is spec_base_sampler
+            ):
+                self.sampler = cached_spec_sampler
+                self.generate_function = cached_spec_fn
+            else:
+                self.sampler = SpeculativeSampler(
+                    num_speculative_tokens=num_spec,
+                    base_sampler=spec_base_sampler,
+                    temperature=getattr(original_sampler, "temperature", 1.0),
+                )
+                self.generate_function = None  # force recompile
 
-            # The shifting rolls the content over so the prompt is at the end of
-            # the sequence and the generated text is at the beginning. We mask
-            # it to retain the generated text only.
-            y["padding_mask"] = ops.logical_xor(
-                roll_sequence(prompt_mask), roll_sequence(x["padding_mask"])
-            )
-            # we assume the mask is enough and there is no need to zero-out the
-            # values
-            y["token_ids"] = roll_sequence(x["token_ids"])
+            self._assistant_model = assistant_model
 
-            return y
+        try:
+            # Setup our three main passes.
+            # 1. Optionally preprocessing strings to dense integer tensors.
+            # 2. Generate new tokens via a compiled function on dense tensors.
+            # 3. Optionally postprocess dense integer tensors back to string.
+            generate_function = self.make_generate_function()
 
-        def postprocess(x):
-            return self.preprocessor.generate_postprocess(x)
+            if self.preprocessor is None and stop_token_ids == "auto":
+                raise ValueError(
+                    "A `preprocessor` must be attached to the model if "
+                    '`stop_token_ids="auto"`. Currently `preprocessor=None`. To '
+                    "call `generate()` with preprocessing detached, either pass "
+                    "`stop_token_ids=None` to always generate until `max_length` "
+                    "or pass a tuple of token ids that should terminate generation "
+                    "as `stop_token_ids`."
+                )
+            elif stop_token_ids == "auto":
+                stop_token_ids = [self.preprocessor.tokenizer.end_token_id]
+                # Some models like Llama3 use two end tokens: <|eot_id|> in
+                # "instruct" versions and <|end_of_text|> in others.
+                if hasattr(self.preprocessor.tokenizer, "end_token2_id"):
+                    stop_token_ids.append(self.preprocessor.tokenizer.end_token2_id)
 
-        # Normalize inputs, apply our three passes, and normalize outputs.
-        inputs, input_is_scalar = self._normalize_generate_inputs(inputs)
+            def preprocess(x):
+                return self.preprocessor.generate_preprocess(
+                    x, sequence_length=max_length
+                )
 
-        if self.preprocessor is not None:
-            inputs = [preprocess(x) for x in inputs]
+            def generate(x):
+                return generate_function(x, stop_token_ids=stop_token_ids)
 
-        if strip_prompt:
-            outputs = [strip_prompt_function(generate(x), x) for x in inputs]
-        else:
-            outputs = [generate(x) for x in inputs]
+            def strip_prompt_function(x, prompt):
+                # This function removes the prompt from the generated
+                # response, in a batch-friendly fashion.
+                y = {}
+                prompt_mask = prompt["padding_mask"]
+                seq_len = prompt_mask.shape[1]
 
-        if self.preprocessor is not None:
-            outputs = [postprocess(x) for x in outputs]
+                # We need to shift every output sequence by the size of the prompt.
+                shifts = -ops.sum(ops.cast(prompt_mask, "int"), axis=1) % seq_len
+                ix = ops.arange(seq_len, dtype="int")
+                ix = ops.expand_dims(ix, axis=0) - ops.expand_dims(shifts, axis=1)
 
-        return self._normalize_generate_outputs(outputs, input_is_scalar)
+                # This produces the desired shift (in fact a rollover).
+                def roll_sequence(seq):
+                    return ops.take_along_axis(seq, ix, axis=1)
+
+                # The shifting rolls the content over so the prompt is at the end of
+                # the sequence and the generated text is at the beginning. We mask
+                # it to retain the generated text only.
+                y["padding_mask"] = ops.logical_xor(
+                    roll_sequence(prompt_mask), roll_sequence(x["padding_mask"])
+                )
+                # we assume the mask is enough and there is no need to zero-out the
+                # values
+                y["token_ids"] = roll_sequence(x["token_ids"])
+
+                return y
+
+            def postprocess(x):
+                return self.preprocessor.generate_postprocess(x)
+
+            # Normalize inputs, apply our three passes, and normalize outputs.
+            inputs, input_is_scalar = self._normalize_generate_inputs(inputs)
+
+            if self.preprocessor is not None:
+                inputs = [preprocess(x) for x in inputs]
+
+            if strip_prompt:
+                outputs = [strip_prompt_function(generate(x), x) for x in inputs]
+            else:
+                outputs = [generate(x) for x in inputs]
+
+            if self.preprocessor is not None:
+                outputs = [postprocess(x) for x in outputs]
+
+            return self._normalize_generate_outputs(outputs, input_is_scalar)
+        finally:
+            if assistant_model is not None:
+                self._cached_spec_sampler = self.sampler
+                self._cached_spec_generate_fn = self.generate_function
+                # Restore original sampler and compiled graph.
+                self._assistant_model = None
+                self.sampler = original_sampler
+                self.generate_function = original_generate_function
 
     def export_to_transformers(self, path):
         """Export the full CausalLM model to HuggingFace Transformers format.

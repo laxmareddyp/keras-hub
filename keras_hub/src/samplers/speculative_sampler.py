@@ -90,9 +90,62 @@ class SpeculativeSampler(Sampler):
         verify_next=None,
     ):
         if draft_next is None:
-            raise ValueError(
-                "`SpeculativeSampler` requires a `draft_next` callable."
-            )
+            assistant_model = getattr(model, "_assistant_model", None)
+            if assistant_model is not None:
+                def _draft_next(prompt, cache, index):
+                    cache_update_index = index - 1
+                    batch_size = ops.shape(prompt)[0]
+                    sliced_prompt = ops.slice(
+                        prompt, [0, cache_update_index], [batch_size, 1]
+                    )
+                    logits, hidden_states, cache = assistant_model.call_with_cache(
+                        sliced_prompt,
+                        cache,
+                        cache_update_index,
+                    )
+                    return (
+                        ops.squeeze(logits, axis=1),
+                        ops.squeeze(hidden_states, axis=1),
+                        cache,
+                    )
+
+                draft_next = _draft_next
+
+                def _verify_next(prompt, target_cache, index, k):
+                    batch = ops.shape(prompt)[0]
+                    max_len = ops.shape(prompt)[1]
+                    safe_start = ops.maximum(
+                        ops.cast(0, "int32"),
+                        ops.minimum(
+                            ops.cast(index - 1, "int32"),
+                            ops.cast(max_len - k - 1, "int32"),
+                        ),
+                    )
+                    prompt_slice = ops.slice(
+                        prompt, [0, safe_start], [batch, k + 1]
+                    )
+                    logits, _, updated_cache = model.call_with_cache(
+                        prompt_slice,
+                        target_cache,
+                        safe_start,
+                    )
+                    # Align position 0 of logits with index - 1.
+                    start_offset = ops.cast(index - 1, "int32") - safe_start
+                    indices = ops.arange(k + 1, dtype="int32")
+                    indices = ops.minimum(
+                        indices + start_offset, ops.cast(k, "int32")
+                    )
+                    logits = ops.take(logits, indices, axis=1)
+                    return logits, updated_cache
+
+                verify_next = _verify_next
+
+                if draft_cache is None:
+                    _, draft_cache = assistant_model._build_cache(prompt)
+            else:
+                raise ValueError(
+                    "`SpeculativeSampler` requires a `draft_next` callable."
+                )
 
         batch_size = ops.shape(prompt)[0]
         max_length = ops.shape(prompt)[-1]
