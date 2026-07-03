@@ -40,6 +40,7 @@ torch.set_default_device(device)
 PRESET_MAP = {
     "qwen3_5_moe_35b_a3b_base": "Qwen/Qwen3.5-35B-A3B-Base",
     "qwen3_5_moe_35b_a3b": "Qwen/Qwen3.5-35B-A3B",
+    "qwen3_6_moe_35b_a3b": "Qwen/Qwen3.6-35B-A3B",
 }
 
 IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -80,7 +81,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_bool(
     "skip_generation",
-    False,
+    True,
     "If True, skip all text generation steps and only run "
     "numerical logit validation.",
 )
@@ -209,7 +210,10 @@ def precompute_hf_outputs(hf_model, hf_tokenizer, hf_preset):
         if os.path.exists(vid_path):
             os.remove(vid_path)
 
-    # Use HF's official qwen_vl_utils API for correct video preprocessing.
+    # Preprocess video frames using qwen_vl_utils for correct pixel
+    # extraction, but use the hardcoded VIDEO_PROMPT directly instead
+    # of apply_chat_template (which fails on base models that lack a
+    # chat template).
     messages = [
         {
             "role": "user",
@@ -220,9 +224,6 @@ def precompute_hf_outputs(hf_model, hf_tokenizer, hf_preset):
         }
     ]
     try:
-        text_input = processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
         image_inputs, video_inputs, video_kwargs = process_vision_info(
             messages, return_video_kwargs=True
         )
@@ -230,7 +231,7 @@ def precompute_hf_outputs(hf_model, hf_tokenizer, hf_preset):
             if isinstance(v, list) and len(v) == 1:
                 video_kwargs[k] = v[0]
         hf_inputs_vid = processor(
-            text=[text_input],
+            text=[VIDEO_PROMPT],
             images=image_inputs,
             videos=video_inputs,
             return_tensors="pt",
