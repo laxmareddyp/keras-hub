@@ -18,8 +18,16 @@ from keras_hub.src.utils.tensor_utils import get_tensor_size_in_bits
 try:
     import kagglehub
     from kagglehub.exceptions import KaggleApiHTTPError
-except ImportError:
-    kagglehub = None
+except ImportError as e:
+    if getattr(e, "name", None) == "kagglehub":
+        kagglehub = None
+    else:
+        raise ImportError(
+            f"The `kagglehub` package is installed but failed to import "
+            f"due to a dependency error: {e}. This is likely caused by "
+            f"an incompatible version of `kagglesdk`. Please try: "
+            f"`pip install --upgrade kagglehub kagglesdk`."
+        ) from e
 
 try:
     import huggingface_hub
@@ -124,7 +132,6 @@ def find_subclass(preset, cls, backbone_cls):
 
 def get_file(preset, path):
     """Download a preset file in necessary and return the local path."""
-    # TODO: Add tests for FileNotFound exceptions.
     if not isinstance(preset, str):
         raise ValueError(
             f"A preset identifier must be a string. Received: preset={preset}"
@@ -909,7 +916,7 @@ class KerasPresetSaver:
         # Save preprocessor.
         if task.preprocessor and hasattr(task.preprocessor, "save_to_preset"):
             task.preprocessor.save_to_preset(self.preset_dir)
-        else:
+        elif task.preprocessor is not None:
             # Allow saving a `keras.Layer` that is not a preprocessor subclass.
             self.save_preprocessor(task.preprocessor)
 
@@ -948,8 +955,8 @@ class KerasPresetSaver:
         tasks = list_subclasses(Task)
         tasks = filter(lambda x: x.backbone_cls is type(layer), tasks)
         tasks = [task.__base__.__name__ for task in tasks]
-        # Keep task list alphabetical.
-        tasks = sorted(tasks)
+        # Keep task list alphabetical and deduplicated.
+        tasks = sorted(set(tasks))
 
         keras_version = keras.version() if hasattr(keras, "version") else None
         metadata = {
