@@ -3,9 +3,9 @@
 # Please see the documentation for all configuration options:
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 
-# zizmor: ignore[insufficient-cooldown]
 version: 2
 updates:
+  # zizmor: ignore[insufficient-cooldown]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -14,6 +14,7 @@ updates:
       github-actions:
         patterns:
           - "*"
+  # zizmor: ignore[insufficient-cooldown]
   - package-ecosystem: "pip"
     directory: "/"
     schedule:

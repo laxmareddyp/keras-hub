@@ -58,7 +58,7 @@ jobs:
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
           env:
-            ISSUE_NUMBER: ${{ github.event.inputs.issue_number || inputs.issue_number }}
+            ISSUE_NUMBER: '${{ github.event.inputs.issue_number || inputs.issue_number }}'
           script: |
             const issueNumber = process.env.ISSUE_NUMBER;
             const { data: issue } = await github.rest.issues.get({
@@ -307,3 +307,4 @@ jobs:
               });
               core.info(`Successfully posted automated response for #${issueNumber}`);
             }
+

@@ -1,9 +1,9 @@
 name: auto-assignment
+# zizmor: ignore[insecure-pull-request-target]
 on:
   issues:
     types:
       - opened
-  # zizmor: ignore[insecure-pull-request-target]
   pull_request_target:
     types:
       - opened
@@ -26,3 +26,4 @@ jobs:
           script: |
             const script = require('./\.github/workflows/scripts/auto-assignment.js')
             script({github, context})
+
