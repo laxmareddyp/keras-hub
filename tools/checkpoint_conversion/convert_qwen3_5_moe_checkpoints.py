@@ -8,6 +8,7 @@ Usage:
 import gc
 import os
 import random
+import shutil
 import tempfile
 import traceback
 from io import BytesIO
@@ -361,7 +362,8 @@ def validate_text_output(keras_model, hf_results):
     # --- End-to-end generation ---
     if not FLAGS.skip_generation:
         print("\n  Generating text...")
-        keras_output = keras_model.generate(TEXT_PROMPT, max_length=64)
+        GEN_MAX_LEN = 36  # 4 prompt + 32 new tokens (matches HF max_new_tokens)
+        keras_output = keras_model.generate(TEXT_PROMPT, max_length=GEN_MAX_LEN)
         print(f"  KerasHub: {_extract_response(keras_output)}")
         print(f"  HF:       {hf_results['text_generated']}")
         print("  ✓ Text generation completed.")
@@ -550,9 +552,14 @@ def validate_video_output(keras_model, hf_results):
 # ---------------------------------------------------------------
 def save_preset(keras_model, preset_name):
     """Save the converted model as a KerasHub preset."""
-    print(f"\n-> Saving KerasHub preset to ./{preset_name}...")
-    keras_model.save_to_preset(f"./{preset_name}")
-    print(f"  ✓ Preset saved to ./{preset_name}")
+    preset_path = f"./{preset_name}"
+    # Remove existing directory to avoid stale h5py file locks.
+    if os.path.exists(preset_path):
+        print(f"\n-> Removing existing preset at {preset_path}...")
+        shutil.rmtree(preset_path)
+    print(f"-> Saving KerasHub preset to {preset_path}...")
+    keras_model.save_to_preset(preset_path)
+    print(f"  ✓ Preset saved to {preset_path}")
 
 
 # ---------------------------------------------------------------
@@ -599,6 +606,10 @@ def main(_):
     keras_model = keras_hub.models.Qwen3_5MoeCausalLM.from_preset(
         f"hf://{hf_preset}", dtype="float32"
     )
+    # Use greedy decoding to match HF's `do_sample=False`.
+    # The KerasHub default is `top_k`, which is stochastic and will produce
+    # different outputs even with identical model weights.
+    keras_model.compile(sampler="greedy")
     print("   KerasHub model loaded!")
 
     # --- Phase 4: Validate against precomputed HF outputs ---
