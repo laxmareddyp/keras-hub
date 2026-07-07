@@ -85,8 +85,10 @@ Pull requests modifying GitHub Actions workflows are automatically validated usi
 Before requesting review:
 
 - Resolve all Zizmor findings whenever possible.
-- Run Zizmor locally when modifying workflow files.
-- Use `# zizmor: ignore[...]` only for verified false positives.
+- Run Zizmor locally when modifying workflow files (e.g., using `uvx zizmor .github/` or `pipx run zizmor .github/`).
+- Use `# zizmor: ignore[rule-name]` only for verified false positives.
+  - Examples: `# zizmor: ignore[cache-poisoning]`, `# zizmor: ignore[insecure-pull-request-target]`.
+  - For a full list of rules, see the [Zizmor Rules Documentation](https://docs.zizmor.sh/audits/).
 - Every suppression must include a clear justification explaining why the finding is safe.
 - Pull requests containing undocumented suppressions may be rejected during review.
 

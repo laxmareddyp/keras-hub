@@ -19,6 +19,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv dependencies
+        # zizmor: ignore[impostor-commit]
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8
 
       - name: Run zizmor
