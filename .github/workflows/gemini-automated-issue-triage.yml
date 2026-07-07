@@ -55,10 +55,10 @@ jobs:
         if: |-
           github.event_name == 'workflow_dispatch'
         uses: 'actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3' # v9
+        env:
+          ISSUE_NUMBER: '${{ github.event.inputs.issue_number || inputs.issue_number }}'
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
-          env:
-            ISSUE_NUMBER: '${{ github.event.inputs.issue_number || inputs.issue_number }}'
           script: |
             const issueNumber = process.env.ISSUE_NUMBER;
             const { data: issue } = await github.rest.issues.get({
@@ -307,4 +307,3 @@ jobs:
               });
               core.info(`Successfully posted automated response for #${issueNumber}`);
             }
-

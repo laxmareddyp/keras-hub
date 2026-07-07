@@ -5,8 +5,7 @@
 
 version: 2
 updates:
-  # zizmor: ignore[insufficient-cooldown]
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: "github-actions" # zizmor: ignore[dependabot-cooldown]
     directory: "/"
     schedule:
       interval: "monthly"
@@ -14,8 +13,7 @@ updates:
       github-actions:
         patterns:
           - "*"
-  # zizmor: ignore[insufficient-cooldown]
-  - package-ecosystem: "pip"
+  - package-ecosystem: "pip" # zizmor: ignore[dependabot-cooldown]
     directory: "/"
     schedule:
       interval: "monthly"

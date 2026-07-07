@@ -1,9 +1,8 @@
 name: 'Labeler'
-# zizmor: ignore[insecure-pull-request-target]
 on:
   issues:
     types: [edited, opened]
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, edited]
 
 permissions:

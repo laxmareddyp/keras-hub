@@ -43,12 +43,12 @@ jobs:
         run: |
           python pip_build.py --nightly
       - name: Publish KerasHub Nightly to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1 # zizmor: ignore[use-trusted-publishing]
         with:
           password: ${{ secrets.PYPI_NIGHTLY_API_TOKEN_HUB }}
           verbose: true
       - name: Publish KerasNLP Nightly to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1 # zizmor: ignore[use-trusted-publishing]
         with:
           packages-dir: keras_nlp/dist/
           password: ${{ secrets.PYPI_NIGHTLY_API_TOKEN }}
