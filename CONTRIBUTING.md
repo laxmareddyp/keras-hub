@@ -79,6 +79,17 @@ request gets approved by the reviewer.
 
 Once the pull request is approved, a team member will take care of merging.
 
+## GitHub Actions Security Validation
+
+Pull requests modifying GitHub Actions workflows are automatically validated using Zizmor.
+Before requesting review:
+
+- Resolve all Zizmor findings whenever possible.
+- Run Zizmor locally when modifying workflow files.
+- Use `# zizmor: ignore[...]` only for verified false positives.
+- Every suppression must include a clear justification explaining why the finding is safe.
+- Pull requests containing undocumented suppressions may be rejected during review.
+
 ## Setting up an Environment
 
 Python 3.11 or later is required.

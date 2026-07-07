@@ -31,11 +31,7 @@ defaults:
 
 permissions:
   contents: 'read'
-  id-token: 'write'
   issues: 'write'
-  statuses: 'write'
-  packages: 'read'
-  actions: 'write' # Required for cancelling a workflow run
 
 jobs:
   triage-issue:
@@ -58,7 +54,7 @@ jobs:
         id: 'get_issue_data'
         if: |-
           github.event_name == 'workflow_dispatch'
-        uses: 'actions/github-script@v9'
+        uses: 'actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553' # v9
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
           script: |
@@ -74,11 +70,13 @@ jobs:
             return issue;
 
       - name: 'Checkout'
-        uses: 'actions/checkout@v7'
+        uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' # v7
+        with:
+          persist-credentials: false
 
       - name: 'Get Repository Labels'
         id: 'get_labels'
-        uses: 'actions/github-script@v9'
+        uses: 'actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553' # v9
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
           script: |-
@@ -114,7 +112,7 @@ jobs:
             ${{ github.event_name == 'workflow_dispatch' && steps.get_issue_data.outputs.title || github.event.issue.title }}
           ISSUE_BODY: >-
             ${{ github.event_name == 'workflow_dispatch' && steps.get_issue_data.outputs.body || github.event.issue.body }}
-        uses: 'actions/github-script@v9'
+        uses: 'actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553' # v9
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
           script: |-
@@ -232,7 +230,7 @@ jobs:
           ISSUE_NUMBER: '${{ github.event.issue.number || github.event.inputs.issue_number }}'
           LABELS_OUTPUT: '${{ steps.gemini_issue_analysis.outputs.summary }}'
           ALLOWED_LABELS: '${{ steps.get_labels.outputs.available_labels }}'
-        uses: 'actions/github-script@v9'
+        uses: 'actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553' # v9
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
           script: |
@@ -258,7 +256,7 @@ jobs:
             // 1. Strict Label Allowlist
             const requestedLabels = parsed.labels_to_set || [];
             labelsToAdd = requestedLabels.filter(label => ALLOWED_LABELS.includes(label));
-            
+
             if (requestedLabels.length !== labelsToAdd.length) {
               core.warn("Blocked unauthorized labels: " + requestedLabels.filter(l => !ALLOWED_LABELS.includes(l)).join(', '));
             }
@@ -278,7 +276,7 @@ jobs:
             })).data;
             const issueAuthor = issueData.user.login;
 
-            const triageReason = parsed.triage_reason; 
+            const triageReason = parsed.triage_reason;
             if (triageReason && COMMENT_TEMPLATES[triageReason]) {
               responseBody = COMMENT_TEMPLATES[triageReason].replace('${author}', issueAuthor);
             } else {
