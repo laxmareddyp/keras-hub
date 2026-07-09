@@ -32,6 +32,7 @@ defaults:
 permissions:
   contents: 'read'
   issues: 'write'
+  actions: 'write'
 
 jobs:
   triage-issue:
