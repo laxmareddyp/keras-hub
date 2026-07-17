@@ -36,8 +36,8 @@ torch.backends.cudnn.allow_tf32 = False
 import keras_hub  # noqa: E402
 
 PRESET_MAP = {
-    "blip2_opt_2_7b": "Salesforce/blip2-opt-2.7b",
-    "blip2_opt_6_7b": "Salesforce/blip2-opt-6.7b",
+    "blip2_opt_2.7b": "Salesforce/blip2-opt-2.7b",
+    "blip2_opt_6.7b": "Salesforce/blip2-opt-6.7b",
     "blip2_flan_t5_xl": "Salesforce/blip2-flan-t5-xl",
     "blip2_flan_t5_xxl": "Salesforce/blip2-flan-t5-xxl",
 }
