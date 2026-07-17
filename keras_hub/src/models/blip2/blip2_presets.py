@@ -38,7 +38,7 @@ backbone_presets = {
                 "BLIP-2 model using Flan-T5-XXL (~11B) as the frozen "
                 "language model."
             ),
-            "params": 0,
+            "params": 12229596672,
             "path": "blip2",
         },
         "kaggle_handle": "kaggle://keras/blip2/keras/blip2_flan_t5_xxl/1",
