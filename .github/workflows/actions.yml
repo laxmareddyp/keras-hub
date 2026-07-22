@@ -24,7 +24,7 @@ jobs:
         version: [keras-stable]
         include:
           - backend: jax
-            version: keras-3.14
+            version: keras-3.15
           - backend: jax
             version: keras-nightly
           - backend: openvino
@@ -55,11 +55,11 @@ jobs:
       run: |
           pip install -r requirements.txt --progress-bar off
           pip install --no-deps -e "." --progress-bar off
-    - name: Pin Keras 3.14
-      if: ${{ matrix.version == 'keras-3.14'}}
+    - name: Pin Keras 3.15
+      if: ${{ matrix.version == 'keras-3.15'}}
       run: |
         pip uninstall -y keras jaxlib jax
-        pip install keras==3.14.0 --progress-bar off
+        pip install keras==3.15.0 --progress-bar off
         pip install jax==0.6.0 --progress-bar off
     - name: Pin Keras Nightly
       if: ${{ matrix.version == 'keras-nightly'}}
