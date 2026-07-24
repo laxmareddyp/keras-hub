@@ -25,6 +25,7 @@ from absl import app
 from absl import flags
 from keras import ops
 from PIL import Image
+from transformers import AutoConfig
 from transformers import AutoModelForCausalLM
 from transformers import AutoModelForImageTextToText
 from transformers import AutoProcessor
@@ -599,8 +600,6 @@ def save_preset(keras_model, preset_name):
 # ---------------------------------------------------------------
 def _is_text_only(hf_preset):
     """Check if a HuggingFace preset is text-only (no vision weights)."""
-    from transformers import AutoConfig
-
     config = AutoConfig.from_pretrained(hf_preset)
     return getattr(config, "language_model_only", False)
 
